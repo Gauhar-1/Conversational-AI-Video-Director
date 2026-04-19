@@ -3,6 +3,7 @@ import mongoose, { Document, Model, Schema } from "mongoose";
 export interface IMessage {
   role: "user" | "assistant" | "system";
   content: string;
+  timestamp: string;
 }
 
 export interface IScene {
@@ -28,6 +29,7 @@ export interface IProject extends Document {
 const MessageSchema = new Schema<IMessage>({
   role: { type: String, enum: ["user", "assistant", "system"], required: true },
   content: { type: String, required: true },
+  timestamp: { type: String, required: true },
 });
 
 const SceneSchema = new Schema<IScene>({

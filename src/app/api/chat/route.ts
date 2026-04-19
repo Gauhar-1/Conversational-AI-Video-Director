@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { ai } from "@/lib/ai";
-import dbConnect from "@/lib/db"; // Assuming you have a standard mongoose connect file
+import dbConnect from "@/lib/db"; 
 import { Project } from "@/models/Project";
 
 export async function POST(req: Request) {
@@ -8,7 +8,7 @@ export async function POST(req: Request) {
     await dbConnect();
     const { projectId, content, imageBase64 } = await req.json();
 
-    // Auto-create a project if this is the first message
+    // 1. Auto-create or fetch project
     let project;
     if (!projectId) {
       project = await Project.create({ title: "New Video Project", chatHistory: [], visualMetadata: {} });
@@ -17,17 +17,17 @@ export async function POST(req: Request) {
       if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
-    // Phase 1: Process Image (THE FIX)
+    // 2. Phase 1: Process Image 
     if (imageBase64) {
       try {
         const visionResponse = await ai.chat.completions.create({
-          model: "moonshot/kimi-v1-vision", // Standard NVIDIA vision model
+          model: "moonshot/kimi-v1-vision", 
           messages: [
             {
               role: "user",
               content: [
                 { type: "text", text: "Extract the visual metadata (lighting, vibe, colors, major subjects) from this image as a JSON object." },
-                { type: "image_url", image_url: { url: imageBase64 } } // Correct multimodal format
+                { type: "image_url", image_url: { url: imageBase64 } } 
               ],
             },
           ],
@@ -46,58 +46,101 @@ export async function POST(req: Request) {
       }
     }
 
-    // Phase 2: Process Text & Storyboard Intent
-    project.chatHistory.push({ role: "user", content: content || "I uploaded an image." });
+    // 3. Update History
+    project.chatHistory.push({ role: "user", content: content || "I uploaded an image.", timestamp: Date.now().toString()});
 
-    const messages: any[] = project.chatHistory.map((m) => ({ role: m.role, content: m.content }));
-    const isStoryboardIntent = content && content.toLowerCase().includes("generate storyboard");
+    // 4. The Optimized Sliding Window Context Engine
+    const validHistory = project.chatHistory.filter((m: any) => 
+      !m.content.includes("I tried to generate the storyboard, but an error occurred") &&
+      !m.content.includes("I have no response.")
+    );
 
-    let systemPrompt = `You are Director AI. You help users storyboard music videos. 
+    const CONTEXT_WINDOW_SIZE = 6;
+    const recentHistory = validHistory.slice(-CONTEXT_WINDOW_SIZE);
+    const messages: any[] = recentHistory.map((m: any) => ({ role: m.role, content: m.content }));
+
+    // ==========================================
+    // 5. DETERMINISTIC STATE ROUTING (THE MAGIC)
+    // ==========================================
     
-    Current visual metadata extracted from the user's uploaded image: ${JSON.stringify(project.visualMetadata)}. 
+    // Grab the user's message and the previous AI message to figure out what step we are on
+    const userMsg = content ? content.toLowerCase() : "";
+    const historyLen = project.chatHistory.length;
+    const lastAiMsg = historyLen >= 2 ? project.chatHistory[historyLen - 2].content.toLowerCase() : "";
     
-    CRITICAL INSTRUCTION: If the user mentions an uploaded image, picture, or photo, DO NOT say that you are a text-based AI or that you cannot see images. You must act as if you can see the image by heavily referencing the 'Current visual metadata' provided above. Use those exact details to reply.`;
+    // Are they explicitly clicking the "Generate" button?
+    const isStoryboardIntent = userMsg.includes("generate storyboard") || userMsg.includes("generate the final storyboard");
 
+    // Base Persona (Pinned State)
+    let systemPrompt = `You are Director AI, an avant-garde, visionary music video director. Think like Christopher Nolan, Quentin Tarantino, and A24 Films. Be bold.
+    CRITICAL SAFETY RULE: You must ensure all scene descriptions and actions are strictly PG-13. Keep the cinematic action intense but safe.`;
+
+    if (Object.keys(project.visualMetadata).length > 0) {
+        systemPrompt += `\n\nVISUAL METADATA (from user's image): ${JSON.stringify(project.visualMetadata)}. Always reference these specific colors/lighting in your scene descriptions.`;
+    }
+
+    // Dynamic Step Injector (Replaces the massive 5-step manual)
     if (isStoryboardIntent) {
-      systemPrompt += `\n\nCRITICAL: The user requested a storyboard. You MUST return ONLY valid JSON containing an array of scenes. Schema: [{"scene_number": 1, "timestamp": "0:00", "location": "", "action": "", "camera_movement": "", "generation_prompt": ""}]`;
+      // STEP 5: FINAL JSON GENERATION
+      systemPrompt += `\n\nCRITICAL DIRECTIVE: The user requested the final storyboard. You MUST return ONLY valid JSON containing an array of scenes. Schema: [{"scene_number": 1, "timestamp": "0:00", "location": "", "action": "", "camera_movement": "", "generation_prompt": ""}]`;
+    
+    } else if (imageBase64) {
+      // STEP 4: IMAGE RECEIVED
+      systemPrompt += `\n\nCRITICAL DIRECTIVE: The user just uploaded an image reference. Acknowledge the vibe/colors from the VISUAL METADATA. Then, ask EXACTLY: "Are you ready for me to generate the final Storyboard Canvas?"`;
+    
+    } else if (lastAiMsg.includes("satisfactory") || lastAiMsg.includes("adjustments")) {
+      // STEP 3.5: CHECKING APPROVAL
+      if (userMsg.includes("yes") || userMsg.includes("proceed") || userMsg.includes("perfect")) {
+          systemPrompt += `\n\nCRITICAL DIRECTIVE: The user approved the script. Now, ask them to upload an image reference so you can match the color grading, lighting, and vibe.`;
+      } else {
+          systemPrompt += `\n\nCRITICAL DIRECTIVE: The user wants to adjust the script. Make the changes based on their feedback, and ask again: "Is this updated script satisfactory?"`;
+      }
+    
+    } else if (lastAiMsg.includes("video length") || lastAiMsg.includes("how long")) {
+      // STEP 3: SLICE & DICE SCRIPTING
+      systemPrompt += `\n\nCRITICAL DIRECTIVE: The user has provided the video length. Now, slice their story into exact 5-second increments. Write out the continuity script (e.g., "0:00-0:05: [Action]"). End your message by asking EXACTLY: "Is this continuity script satisfactory?"`;
+    
+    } else {
+      // STEP 1 & 2: BRAINSTORMING
+      systemPrompt += `\n\nCRITICAL DIRECTIVE: Discuss the story concept. Ask clarifying questions to make it more cinematic. Once the core story feels established, end your message by asking EXACTLY: "Is this story finalized? If yes, what should be the total video length?"`;
     }
 
     messages.unshift({ role: "system", content: systemPrompt });
 
+    // 6. Call the AI
     const chatResponse = await ai.chat.completions.create({
-      model: "meta/llama3-70b-instruct",
+      model: "minimaxai/minimax-m2.7",
       messages: messages,
       temperature: isStoryboardIntent ? 0.1 : 0.7,
-      max_tokens: 1500,
+      max_tokens: 8000, 
     });
 
     let aiMessageText = chatResponse.choices[0]?.message?.content || "I have no response.";
     
-    // Parse strict JSON if requested
-    // Parse strict JSON if requested
+    // 7. Bulletproof JSON Parsing
     if (isStoryboardIntent) {
        try {
-         // 1. Log the raw output so we can see what the AI actually said in our terminal
          console.log("Raw AI Storyboard Output:", aiMessageText);
 
-         // 2. Find the first '[' and the last ']' to extract the pure array
          const firstBracket = aiMessageText.indexOf('[');
-         const lastBracket = aiMessageText.lastIndexOf(']');
-         
-         if (firstBracket !== -1 && lastBracket !== -1) {
-            const jsonString = aiMessageText.substring(firstBracket, lastBracket + 1);
-            
-            // Scrub rogue newlines that break JSON.parse!
-            const sanitizedJson = jsonString.replace(/\n/g, " ").replace(/\r/g, "");
-            
-            const storyboardData = JSON.parse(sanitizedJson);
-            
-            if (Array.isArray(storyboardData)) {
-               project.storyboard = storyboardData;
-               aiMessageText = "I have successfully generated your storyboard! You can view it on the canvas.";
-            }
+         let lastBracket = aiMessageText.lastIndexOf(']');
+         let jsonString = "";
+
+         if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+           jsonString = aiMessageText.substring(firstBracket, lastBracket + 1);
+         } else if (firstBracket !== -1 && lastBracket === -1) {
+           console.warn("AI response was truncated! Attempting to recover JSON...");
+           jsonString = aiMessageText.substring(firstBracket) + '"}]'; 
          } else {
-            throw new Error("Could not find a valid JSON array brackets in the AI response.");
+            throw new Error("Could not find a valid JSON array start bracket.");
+         }
+         
+         const sanitizedJson = jsonString.replace(/\n/g, " ").replace(/\r/g, "");
+         const storyboardData = JSON.parse(sanitizedJson);
+         
+         if (Array.isArray(storyboardData)) {
+            project.storyboard = storyboardData;
+            aiMessageText = "I have successfully generated your storyboard! You can view it on the canvas.";
          }
        } catch (err) {
          console.error("Failed to parse storyboard JSON:", err);
@@ -105,12 +148,13 @@ export async function POST(req: Request) {
        }
     }
 
-    project.chatHistory.push({ role: "assistant", content: aiMessageText });
+    // 8. Save and Return
+    project.chatHistory.push({ role: "assistant", content: aiMessageText, timestamp: Date.now().toString() });
     await project.save();
 
     return NextResponse.json({
       message: { id: Date.now().toString(), role: "assistant", content: aiMessageText },
-      projectId: project._id, // Return the ID so the frontend can save it
+      projectId: project._id, 
       storyboard: project.storyboard
     });
   } catch (error: any) {
@@ -118,5 +162,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
-
-
