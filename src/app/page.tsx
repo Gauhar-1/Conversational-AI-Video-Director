@@ -4,12 +4,14 @@ import { useState, useEffect } from "react";
 import ChatInterface from "@/components/chat/ChatInterface";
 import StoryboardCanvas from "@/components/storyboard/StoryboardGrid"; 
 import HistorySidebar from "@/components/sidebar/HistorySideBar";
-import { Menu, MessageSquare, Minimize2 } from "lucide-react"; 
+import { Menu, MessageSquare, Minimize2, Settings } from "lucide-react"; 
+import SettingsModal from "@/components/settings/SettingsModal";
 
 export default function Home() {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [viewMode, setViewMode] = useState<'split' | 'chat-only' | 'storyboard-only'>('split');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const handleProjectSelect = (id: string | null) => {
     setActiveProjectId(id);
@@ -52,6 +54,9 @@ export default function Home() {
       {/* Main Content Wrapper */}
       <div className="flex-1 flex flex-col h-full min-w-0 min-h-0 z-10 relative">
         
+        {/* ADD THE SETTINGS MODAL HERE */}
+        <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+
         {/* Header */}
         <header className="h-16 min-h-[64px] flex-shrink-0 border-b border-zinc-800/50 flex items-center justify-between px-6 bg-zinc-950/50 backdrop-blur-md z-20">
           <div className="flex items-center">
@@ -61,12 +66,16 @@ export default function Home() {
             >
               <Menu className="w-5 h-5" />
             </button>
-            <h1 className="text-xl font-extrabold tracking-tight text-white">
+            <h1 className="text-xl font-extrabold tracking-tight text-white flex items-center gap-2">
               Director AI.
+              {/* NEW BYOK BADGE */}
+              <span className="text-[10px] font-mono bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/30 uppercase tracking-widest hidden sm:inline-block">
+                BYOK Mode
+              </span>
             </h1>
           </div>
-
-          {/* Dynamic Recovery Buttons */}
+          
+          {/* Dynamic Recovery & Settings Buttons */}
           <div className="flex items-center gap-3">
             {viewMode === 'storyboard-only' && (
               <button 
@@ -74,7 +83,7 @@ export default function Home() {
                 className="flex items-center gap-2 px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 rounded-full text-sm font-medium transition-all animate-in fade-in zoom-in duration-300"
               >
                 <MessageSquare className="w-4 h-4" />
-                Open Assistant
+                <span className="hidden sm:inline">Open Assistant</span>
               </button>
             )}
             {viewMode === 'chat-only' && (
@@ -83,10 +92,21 @@ export default function Home() {
                 className="flex items-center gap-2 px-4 py-2 bg-purple-600/20 hover:bg-purple-600/40 text-purple-300 border border-purple-500/30 rounded-full text-sm font-medium transition-all animate-in fade-in zoom-in duration-300"
               >
                 <Minimize2 className="w-4 h-4" />
-                Split View
+                <span className="hidden sm:inline">Split View</span>
               </button>
             )}
+
+            {/* NEW SETTINGS BUTTON */}
+            <div className="w-px h-6 bg-zinc-800 mx-1" /> {/* Vertical Divider */}
+            <button 
+              onClick={() => setIsSettingsOpen(true)}
+              className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-all hover:rotate-90 duration-300"
+              title="API & Model Settings"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
           </div>
+          
         </header>
 
         {/* Workspace */}

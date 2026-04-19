@@ -160,12 +160,32 @@ export default function ChatInterface({ activeProjectId, onProjectCreated, onMin
   const mutation = useMutation({
     mutationFn: async (newMsg: Message) => {
       setStoryboardReady(false); 
+
+     // 1. GRAB SETTINGS FROM BROWSER
+      const apiKey = localStorage.getItem("nvidia_api_key");
+      const chatModel = localStorage.getItem("nvidia_chat_model") || "meta/llama-3.1-70b-instruct";
+      
+      if (!apiKey) {
+        throw new Error("MISSING_KEY");
+      }
+
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: newMsg.content, imageBase64, projectId: activeProjectId }),
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}` // 2. PASS THE KEY SECURELY
+        },
+        body: JSON.stringify({ 
+          content: newMsg.content, 
+          imageBase64, 
+          projectId: activeProjectId,
+          chatModel: chatModel // 3. PASS THE MODEL CHOICE
+        }),
       });
+
+      if (response.status === 401) throw new Error("INVALID_KEY");
       if (!response.ok) throw new Error("API Request Failed");
+      
       return response.json();
     },
     onMutate: async (newMsg) => {
@@ -186,8 +206,19 @@ export default function ChatInterface({ activeProjectId, onProjectCreated, onMin
         return [...withoutOptimistic, { timestamp: Date.now().toString(), role: "assistant", content: data.message.content }];
       });
     },
+    onError: (err: any, newMsg, context) => {
+      if (context?.previousMessages) queryClient.setQueryData(["chatMessages", activeProjectId || "draft"], context.previousMessages);
+      
+      // 4. HANDLE KEY ERRORS GRACEFULLY
+      if (err.message === "MISSING_KEY") {
+        alert("Please click the Settings gear icon and enter your NVIDIA API Key.");
+      } else if (err.message === "INVALID_KEY") {
+        alert("Your NVIDIA API Key is invalid or expired. Please check your Settings.");
+      }
+    },
   });
 
+  
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
     if (textareaRef.current) {
@@ -250,7 +281,7 @@ export default function ChatInterface({ activeProjectId, onProjectCreated, onMin
           </div>
         )}
         
-        {messages.map((msg) => <ChatMessage key={msg._id} msg={msg} />)}
+        {messages.map((msg, index) => <ChatMessage key={msg._id || msg.timestamp || index} msg={msg} />)}
         {mutation.isPending && <TypingIndicator />}
         
         {storyboardReady && !mutation.isPending && (

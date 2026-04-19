@@ -3,7 +3,7 @@ import { v2 as cloudinary } from "cloudinary";
 import dbConnect from "@/lib/db";
 import { Project } from "@/models/Project";
 
-// Configure Cloudinary
+// Configure Cloudinary (Keep this server-side! You pay for storage, they pay for AI)
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -12,7 +12,13 @@ cloudinary.config({
 
 export async function POST(req: Request) {
   try {
-    // 1. We now need the projectId and sceneNumber from the frontend to save it to the DB
+    // 1. EXTRACT THE USER'S HUGGING FACE KEY
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Missing Hugging Face API Key" }, { status: 401 });
+    }
+    const userHfKey = authHeader.split("Bearer ")[1];
+
     const { prompt, projectId, sceneNumber } = await req.json();
 
     if (!prompt || !projectId || sceneNumber === undefined) {
@@ -21,12 +27,12 @@ export async function POST(req: Request) {
 
     await dbConnect();
 
-    // 2. Generate Image from Hugging Face
+    // 2. GENERATE IMAGE USING THE USER'S KEY
     const hfResponse = await fetch(
       "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell",
       {
         headers: {
-          Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
+          Authorization: `Bearer ${userHfKey}`, // INJECT USER KEY HERE
           "Content-Type": "application/json",
         },
         method: "POST",
@@ -37,7 +43,16 @@ export async function POST(req: Request) {
     if (!hfResponse.ok) {
       const errorText = await hfResponse.text();
       console.error("Hugging Face API Error:", errorText);
-      return NextResponse.json({ error: "Failed to generate image" }, { status: hfResponse.status });
+      
+      // Handle Quota/Auth errors specifically for better UX
+      if (hfResponse.status === 401) {
+        return NextResponse.json({ error: "Invalid Hugging Face API Key" }, { status: 401 });
+      }
+      if (hfResponse.status === 429) {
+        return NextResponse.json({ error: "Hugging Face rate limit exceeded. Try again in an hour." }, { status: 429 });
+      }
+      
+      return NextResponse.json({ error: "Failed to generate image from AI provider" }, { status: hfResponse.status });
     }
 
     // 3. Convert response to a Node.js Buffer
@@ -47,7 +62,7 @@ export async function POST(req: Request) {
     // 4. Upload Buffer directly to Cloudinary using a stream
     const cloudinaryUrl = await new Promise<string>((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
-        { folder: `director_ai/${projectId}` }, // Organizes images by project!
+        { folder: `director_ai/${projectId}` }, 
         (error, result) => {
           if (error) reject(error);
           else resolve(result!.secure_url);

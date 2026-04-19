@@ -12,6 +12,12 @@ cloudinary.config({
 
 export async function POST(req: Request) {
   try {
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Missing SiliconFlow API Key!!" }, { status: 401 });
+    }
+    const userSfKey = authHeader.split("Bearer ")[1];
+
     const body = await req.json();
 
     // -----------------------------------------------------------------
@@ -23,10 +29,10 @@ export async function POST(req: Request) {
       const statusRes = await fetch("https://api.siliconflow.com/v1/video/status", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${process.env.SILICONFLOW_API_KEY?.trim()}`,
+          "Authorization": `Bearer ${userSfKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ requestId }),
+        body: JSON.stringify({ requestId: body.requestId }),
       });
 
       const statusData = await statusRes.json();
@@ -81,13 +87,13 @@ export async function POST(req: Request) {
     // -----------------------------------------------------------------
     // CASE 2: SUBMITTING THE INITIAL TASK
     // -----------------------------------------------------------------
-    const { image, prompt } = body;
+    const { image, prompt, videoModel } = body;
     if (!image) return NextResponse.json({ error: "No image provided" }, { status: 400 });
 
     const submitRes = await fetch("https://api.siliconflow.com/v1/video/submit", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${process.env.SILICONFLOW_API_KEY?.trim()}`,
+        "Authorization": `Bearer ${userSfKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({

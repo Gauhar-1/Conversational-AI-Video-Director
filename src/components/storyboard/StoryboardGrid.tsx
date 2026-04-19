@@ -249,12 +249,22 @@ const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
     setEdges(newEdges);
   }, [storyboard, generatedImages, generatedVideos, generatingImgIds, generatingVideoIds, imgErrors, videoErrors]);
 
+
+
   const generateImageForScene = async (sceneNumber: number, prompt: string) => {
     if (!activeProjectId) return;
+
+    const hfKey = localStorage.getItem("hf_api_key");
     
-    // Reset states for this node
     setGeneratingImgIds(prev => ({ ...prev, [sceneNumber]: true }));
     setImgErrors(prev => ({ ...prev, [sceneNumber]: "" }));
+    
+    // 2. CHECK IF KEY EXISTS BEFORE CALLING API
+    if (!hfKey) {
+      setImgErrors(prev => ({ ...prev, [sceneNumber]: "Missing Hugging Face Key. Please add it in Settings." }));
+      setGeneratingImgIds(prev => ({ ...prev, [sceneNumber]: false }));
+      return;
+    }
     
     const cleanPrompt = prompt.replace(/['"\n\r]/g, '').trim();
     const finalPrompt = `${cleanPrompt}, cinematic lighting, highly detailed masterpiece`;
@@ -262,7 +272,7 @@ const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
     try {
       const response = await fetch("/api/generate-image", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${hfKey}` },
         body: JSON.stringify({ prompt: finalPrompt, projectId: activeProjectId, sceneNumber: sceneNumber }),
       });
       const data = await response.json();
@@ -278,18 +288,26 @@ const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
   const generateVideoForScene = async (scene: IScene, imageUrl: string) => {
     if (!imageUrl) return alert("Generate an image first!");
+
+    const sfKey = localStorage.getItem("siliconflow_api_key");
+    const videoModel = localStorage.getItem("nvidia_video_model") || "stabilityai/stable-video-diffusion";
     
-    // Reset states for this node
     setGeneratingVideoIds(prev => ({ ...prev, [scene.scene_number]: true }));
     setVideoErrors(prev => ({ ...prev, [scene.scene_number]: "" }));
 
+    // 2. CHECK IF KEY EXISTS
+    if (!sfKey) {
+      setVideoErrors(prev => ({ ...prev, [scene.scene_number]: "Missing SiliconFlow Key. Add it in Settings." }));
+      setGeneratingVideoIds(prev => ({ ...prev, [scene.scene_number]: false }));
+      return;
+    }
     try {
       const prompt = `Cinematic 4k masterpiece. Location: ${scene.location}. Action: ${scene.action}. Camera: ${scene.camera_movement}.`;
 
       const submitRes = await fetch("/api/generate-video", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: imageUrl, prompt: prompt })
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${sfKey}` },
+        body: JSON.stringify({ image: imageUrl, prompt: prompt, videoModel: videoModel })
       });
       
       const submitData = await submitRes.json();
@@ -299,7 +317,8 @@ const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
         try {
           const pollRes = await fetch("/api/generate-video", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "application/json", 
+              "Authorization": `Bearer ${sfKey}` },
             body: JSON.stringify({ requestId: submitData.requestId, projectId: activeProjectId, sceneNumber: scene.scene_number })
           });
           

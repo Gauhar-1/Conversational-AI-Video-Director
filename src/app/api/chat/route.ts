@@ -2,11 +2,27 @@ import { NextResponse } from "next/server";
 import { ai } from "@/lib/ai";
 import dbConnect from "@/lib/db"; 
 import { Project } from "@/models/Project";
+import OpenAI from "openai";
 
 export async function POST(req: Request) {
   try {
+
+    // 1. BYOK INTERCEPTION
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Unauthorized: Missing API Key" }, { status: 401 });
+    }
+    const userApiKey = authHeader.split("Bearer ")[1];
+
+    // DYNAMICALLY INSTANTIATE THE CLIENT
+    const nvidiaClient = new OpenAI({
+      apiKey: userApiKey,
+      baseURL: "https://integrate.api.nvidia.com/v1", // Using NVIDIA NIM endpoint
+    });
+
     await dbConnect();
-    const { projectId, content, imageBase64 } = await req.json();
+   const { projectId, content, imageBase64, chatModel } = await req.json();
+   const activeChatModel = chatModel || "meta/llama-3.1-70b-instruct";
 
     // 1. Auto-create or fetch project
     let project;
@@ -20,8 +36,8 @@ export async function POST(req: Request) {
     // 2. Phase 1: Process Image 
     if (imageBase64) {
       try {
-        const visionResponse = await ai.chat.completions.create({
-          model: "moonshot/kimi-v1-vision", 
+        const visionResponse = await nvidiaClient.chat.completions.create({
+          model: "meta/llama-3.2-90b-vision-instruct", 
           messages: [
             {
               role: "user",
@@ -108,8 +124,8 @@ export async function POST(req: Request) {
     messages.unshift({ role: "system", content: systemPrompt });
 
     // 6. Call the AI
-    const chatResponse = await ai.chat.completions.create({
-      model: "minimaxai/minimax-m2.7",
+    const chatResponse = await nvidiaClient.chat.completions.create({
+      model: activeChatModel,
       messages: messages,
       temperature: isStoryboardIntent ? 0.1 : 0.7,
       max_tokens: 8000, 
@@ -158,6 +174,9 @@ export async function POST(req: Request) {
       storyboard: project.storyboard
     });
   } catch (error: any) {
+    if (error.status === 401 || error.message.includes("401")) {
+      return NextResponse.json({ error: "Invalid API Key" }, { status: 401 });
+    }
     console.error("API Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
