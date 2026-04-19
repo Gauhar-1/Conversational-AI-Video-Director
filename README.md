@@ -1,68 +1,57 @@
-# 🎬 Conversational AI Video Director: Storyboard Copilot
+# 🎬 Director AI. (Conversational Video Director)
 
-## 🎯 Project Objective
+Director AI is an avant-garde, AI-powered music video and cinematic sequence director. It provides a multimodal workspace where users can chat with a visionary AI director, upload reference images for aesthetic extraction, and automatically generate structured storyboards. 
 
-The Conversational AI Video Director aims to provide a cohesive, multimodal, and interactive platform for generating film/video storyboards from natural language prompts. It combines a conversational AI chat interface with a structured visual storyboard canvas, allowing users to iterate on scene concepts, visualize them, and generate production-ready assets (images and short video clips) based on a guided, sequential process.
-
-**Goal:** To move from a high-level script/concept to a finalized, stitchable sequence of cinematic video clips, all managed within a single collaborative web environment.
+It features a complete pipeline to generate concept art and high-fidelity video clips for every scene, all wrapped in a highly secure, **Zero-Liability BYOK (Bring Your Own Key)** architecture.
 
 ---
 
-## 🏗️ 🏛️ Current Architecture Overview
+## ✨ Key Features
 
-The application is built on a Next.js framework, adopting a component-based, state-driven architecture with data managed via MongoDB (Mongoose) and an external AI model (NVIDIA NIM via OpenAI SDK).
+### 🧠 1. The Director Engine (AI Chat & Vision)
+* **Avant-Garde AI Persona:** An AI assistant specifically prompted to act like a visionary film director (think Christopher Nolan or A24 Films), enforcing PG-13 safety rules while keeping action intense.
+* **Sliding Window Context:** Optimizes token usage by only sending the last 6 valid messages to the AI, preventing token bloat and API crashes.
+* **Vision Metadata Extraction:** Users can upload a reference image. The app uses an advanced vision model (`meta/llama-3.2-90b-vision-instruct`) to instantly extract a JSON object of the lighting, vibe, colors, and major subjects.
+* **Dual-Model Routing:** Uses heavy, expensive vision models *only* for the split-second image extraction, and switches back to blazing-fast, cheap text models for the ongoing conversation.
 
-### 🧠 1. Core Components and Flow
+### 🎥 2. Storyboard & Media Generation
+* **Automated JSON Storyboarding:** The AI converts the finalized chat concept into a structured JSON array of scenes (Scene Number, Timestamp, Location, Action, Camera Movement).
+* **Concept Art Generation:** Integrated with **Hugging Face** to generate cinematic reference images (e.g., FLUX.1) for each scene based on the AI's prompts.
+* **Cinematic Video Animation:** Integrated with **SiliconFlow** (Wan-AI/Kling) to animate the concept art into 4K cinematic video clips. Includes an automated background polling system to check video status every 5 seconds.
+* **Permanent Cloud Storage:** Server-side integration with **Cloudinary** automatically uploads and hosts generated images and videos, saving permanent URLs to the MongoDB database.
 
-*   **`src/app/layout.tsx`**: Establishes the global, full-screen, dark, cinematic theme, ensuring consistent styling across all pages and utilizing `Providers` for state management.
-*   **`src/app/page.tsx`**: Defines the main 3-panel layout:
-    1.  **History Sidebar (`HistorySidebar` - TBD):** Allows users to switch between different projects, maintaining state persistence.
-    2.  **Chat Interface (`ChatInterface`):** The primary input mechanism. Users communicate with the AI using text or uploading reference images.
-    3.  **Storyboard Canvas (`StoryboardGrid`):** The visual output terminal where scenes are rendered and managed.
-*   **`src/lib/db.ts`**: Manages the connection to MongoDB, ensuring a cached connection pool for efficiency during development/API calls.
+### 🛡️ 3. "Zero-Liability" BYOK Architecture
+* **Client-Side Key Storage:** API keys for NVIDIA, Hugging Face, and SiliconFlow are stored strictly in the user's browser `localStorage`.
+* **Zero Database Risk:** User API keys never touch the backend database, completely eliminating financial liability if the database is ever compromised.
+* **Dynamic Client Instantiation:** The Next.js backend dynamically spins up AI SDK clients per-request using transient HTTP headers, ensuring complete tenant isolation.
 
-### 🤖 💬 2. Interaction Flow
-
-1.  **User Input:** User types a prompt or uploads an image into the `ChatInterface`.
-2.  **State Management:** The `ChatInterface` uses React Query for data fetching and implements *optimistic updates* to provide immediate feedback to the user while waiting for the AI response.
-3.  **AI Processing:** The input is sent to the `/api/chat` endpoint. This endpoint communicates with the OpenAI SDK, which is configured to point to **NVIDIA NIM endpoints** (`src/lib/ai.ts`).
-4.  **Scene Creation:** The AI processes the request and returns a structured response containing metadata for one or more new scenes, which are then persisted in the `Project` model.
-
-### 🖼️ 🎥 3. Data Persistence and Model (`src/models/Project.ts`)
-
-The core project entity (`IProject`) manages the entire session state:
-
-*   **`chatHistory: IMessage[]`**: Stores the full conversation log (user, assistant, system messages).
-*   **`storyboard: IScene[]`**: The chronological sequence of generated scenes. Each `IScene` holds detailed parameters necessary for reproduction:
-    *   `scene_number`: Sequence order.
-    *   `timestamp`, `location`, `action`, `camera_movement`: Script elements.
-    *   `generation_prompt`: The finalized, rich prompt used to generate the asset.
-    *   `image_url` / `video_url`: Pointers to the generated media.
-*   **`visualMetadata: Record<string, any>`**: A catch-all for global project parameters or external API tokens.
-
-### 🖼️ 🎬 4. Storyboard Generation Logic (`StoryboardGrid.tsx`)
-
-The canvas is the operational center for asset creation.
-
-*   **`SceneNode` Component:** Renders a single scene block. It is responsible for displaying the media (video/image) and providing control buttons.
-*   **Generation Handlers:**
-    *   **Image Generation (`/api/generate-image`):** Triggers the API to create a high-quality static image based on the scene prompt.
-    *   **Video Generation (`/api/generate-video`):** This is a complex, asynchronous process that uses a combination of the generated `imageUrl` and the scene's metadata to instruct the AI to render a short, cinematic clip. It utilizes a **polling loop** (`setInterval`) to wait for the final asset availability.
-*   **Final Cut Player:** The canvas includes a sequence player that allows the user to stitch all available video assets together into a single, continuous viewing experience, providing instant feedback on the completed work.
+### 🎨 4. Advanced UI / UX
+* **Glassmorphic Settings Modal:** A centralized, categorized UI for users to input their own API keys and select their preferred models across the three pipeline stages (Chat, Image, Video).
+* **Dynamic Workspace:** Toggles between Split View, Chat-Only, and Storyboard-Only modes to maximize focus.
+* **Interactive Canvas Nodes:** * Cinematic glowing states (Purple for Image Generating, Teal for Video Generating).
+  * Hover-to-play mechanics for generated video clips.
+* **Inspector Side Drawer:** A sliding right-hand panel that elegantly displays final videos, original image references, and scene metadata.
+* **Granular Error Overlays:** Instead of crashing the app, API errors (like `401 Invalid Key`, `429 Rate Limit`, or Out of Credits) are caught and displayed directly on the specific scene node via a sleek red overlay.
+* **Optimistic UI Updates:** Chat messages render instantly on the screen before the database confirms the save, eliminating visual latency.
 
 ---
 
-## 🚀 Missing Functionality & Next Steps Required
+## 🛠️ Tech Stack
 
-While the core pipeline is established, the following areas require implementation or refinement to achieve the desired final result:
+* **Frontend:** Next.js 14 (App Router), React, Tailwind CSS, Lucide React (Icons)
+* **Backend:** Next.js Route Handlers (API)
+* **Database:** MongoDB & Mongoose
+* **Media Storage:** Cloudinary (Server-side)
+* **AI Providers (BYOK):**
+    * **NVIDIA NIM:** Llama 3.1 (Reasoning/Chat) & Llama 3.2 90B Vision (Image Extraction)
+    * **Hugging Face:** FLUX.1 Schnell / Stable Diffusion XL (Image Generation)
+    * **SiliconFlow (.cn):** Wan-AI / Kling (Cinematic Video Generation)
 
-### 1. Completion Checklist (To Be Completed)
-- [ ] **Implement `HistorySidebar`:** Must fetch and display a list of past projects, enabling switching between sessions and ensuring the `activeProjectId` state is correctly managed and utilized by the `ChatInterface`.
-- [ ] **Refine API Error Handling:** Improve user feedback mechanisms for failures in image/video generation (e.g., displaying permanent error states instead of relying solely on alerts).
-- [ ] **Enhance Prompt Templating:** Implement a system to automatically enrich the `generation_prompt` by combining key elements (Location, Action, Camera Movement) more gracefully, ensuring the AI prompt is always optimized for cinematic output.
-- [ ] **Database Write Synchronization:** The `ChatInterface` must ensure that when a project is created or an API response successfully returns new scenes, the entire `IScene[]` array is atomically updated in the database for that project ID.
-- [ ] **UI Polish (Mobile/Responsiveness):** While the layout is defined, ensuring the `StoryboardGrid` remains functional and aesthetically pleasing on smaller screens is necessary.
+---
 
-### 2. Technical Recommendations
-*   **State Management:** Consider using a global state management solution (like Zustand or Redux Toolkit) for project data that is *not* passed through React Query, specifically for global UI state (e.g., `isFullScreen` or the `playlist` state).
-*   **Media Cleanup:** Implement background jobs or cleanup endpoints to manage and eventually delete temporary/draft media assets (images and videos) to prevent storage bloat.
+## 🚀 Setup & Installation
+
+### 1. Clone the repository
+```bash
+git clone [https://github.com/yourusername/Conversational-AI-Video-Director.git](https://github.com/yourusername/Conversational-AI-Video-Director.git)
+cd Conversational-AI-Video-Director
