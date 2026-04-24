@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, memo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ImageIcon, Send, Loader2, Bot, User, X, LayoutTemplate, ChevronRight, Check, XCircle, Edit3, Minimize2, Maximize } from "lucide-react";
+import { ImageIcon, Send, Loader2, Bot, User, X, LayoutTemplate, ChevronRight, Check, XCircle, Edit3, Minimize2, Maximize, Sparkles } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -249,7 +249,11 @@ export default function ChatInterface({ activeProjectId, onProjectCreated, onMin
   const isSatisfactoryQuestion = !mutation.isPending && messages[messages.length - 1]?.role === "assistant" && lastMsgText.includes("satisfactory");
   const isReadyQuestion = !mutation.isPending && messages[messages.length - 1]?.role === "assistant" && lastMsgText.includes("ready");
   
-  const isBinaryQuestion = isSatisfactoryQuestion || isReadyQuestion;
+  // NEW: Detects when the AI asks for an image or offers to decide the aesthetic
+  const isImageRequestQuestion = !mutation.isPending && messages[messages.length - 1]?.role === "assistant" && lastMsgText.includes("you decide");
+  
+  // Combine all action states
+  const isActionRequired = isSatisfactoryQuestion || isReadyQuestion || isImageRequestQuestion;
 
   if (isProjectLoading) {
     return <div className="flex flex-col h-full bg-zinc-950 border border-zinc-800/80 rounded-2xl p-6 shadow-2xl relative overflow-hidden">Loading...</div>
@@ -303,31 +307,45 @@ export default function ChatInterface({ activeProjectId, onProjectCreated, onMin
       {/* Input Area */}
       <div className="p-3 sm:p-4 bg-zinc-950/95 backdrop-blur-xl border-t border-zinc-800/80 min-h-[80px] flex flex-col justify-end transition-all duration-300">
         
-        {isBinaryQuestion && !wantsToAdjust && (
+        {isActionRequired && !wantsToAdjust && (
           <div className="flex flex-col gap-3 w-full animate-in slide-in-from-bottom-2 fade-in">
             <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider px-1">Action Required</p>
             <div className="flex flex-col sm:flex-row gap-2 w-full">
+              
+              {/* PRIMARY ACTION BUTTON */}
               <button 
-                onClick={() => handleSend(undefined, isReadyQuestion ? "Yes, I am ready. Generate the final storyboard." : "Yes, the script is satisfactory. Proceed.")}
+                onClick={() => {
+                  if (isReadyQuestion) handleSend(undefined, "Yes, I am ready. Generate the final storyboard.");
+                  else if (isSatisfactoryQuestion) handleSend(undefined, "Yes, the script is satisfactory. Proceed.");
+                  else if (isImageRequestQuestion) handleSend(undefined, "You decide. Establish the aesthetic for us.");
+                }}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-bold shadow-lg transition-all"
               >
-                <Check className="w-4 h-4" /> 
-                {isReadyQuestion ? "Yes, generate storyboard" : "Yes, script is perfect"}
+                {isImageRequestQuestion ? <Sparkles className="w-4 h-4" /> : <Check className="w-4 h-4" />} 
+                {isReadyQuestion ? "Yes, generate storyboard" : isSatisfactoryQuestion ? "Yes, script is perfect" : "You decide the aesthetic"}
               </button>
+              
+              {/* SECONDARY ACTION BUTTON */}
               <button 
                 onClick={() => {
                   setWantsToAdjust(true);
-                  setTimeout(() => textareaRef.current?.focus(), 50);
+                  setTimeout(() => {
+                    // If asking for an image, automatically open the user's file picker!
+                    if (isImageRequestQuestion) fileInputRef.current?.click(); 
+                    else textareaRef.current?.focus();
+                  }, 50);
                 }}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-xl text-sm font-medium transition-all"
               >
-                <Edit3 className="w-4 h-4" /> No, let's adjust
+                {isImageRequestQuestion ? <ImageIcon className="w-4 h-4" /> : <Edit3 className="w-4 h-4" />} 
+                {isImageRequestQuestion ? "I'll upload an image" : "No, let's adjust"}
               </button>
+
             </div>
           </div>
         )}
 
-        {(!isBinaryQuestion || wantsToAdjust) && (
+        {(!isActionRequired || wantsToAdjust) && (
           <div className="w-full animate-in fade-in duration-300">
             {imageBase64 && (
               <div className="mb-3 relative inline-block animate-in zoom-in-95 duration-200">
