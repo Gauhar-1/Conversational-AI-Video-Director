@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { v2 as cloudinary } from "cloudinary";
-import dbConnect from "@/lib/db";
 import { Project } from "@/models/Project";
+import dbConnect from "@/lib/db";
 
-// 1. Configure Cloudinary
+// Configure Cloudinary for the fallback upload
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -12,164 +12,148 @@ cloudinary.config({
 
 export async function POST(req: Request) {
   try {
-    // -----------------------------------------------------------------
-    // 1. AUTHENTICATION (BYOK)
-    // -----------------------------------------------------------------
-    const authHeader = req.headers.get("authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Missing SiliconFlow API Key in Settings." }, { status: 401 });
-    }
-    const userSfKey = authHeader.split("Bearer ")[1];
-
-    const body = await req.json();
-
-    // -----------------------------------------------------------------
-    // CASE 1: CHECKING STATUS & SAVING TO DB (Polling)
-    // -----------------------------------------------------------------
-    if (body.requestId) {
-      const { requestId, projectId, sceneNumber } = body;
-
-      // FIX: Use .cn domain for SiliconFlow
-      const statusRes = await fetch("https://api.siliconflow.cn/v1/video/status", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${userSfKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ requestId }),
-      });
-
-      const statusData = await statusRes.json();
-      
-      if (statusData.status === "Succeed") {
-        const temporaryUrl = statusData.results.videos[0].url;
-
-        if (!temporaryUrl) {
-           return NextResponse.json({ error: "Video completed but URL is missing from provider." }, { status: 500 });
-        }
-
-       let cloudinaryUrl = "";
-        try {
-          const uploadResult = await cloudinary.uploader.upload(temporaryUrl, {
-            resource_type: "video",
-            folder: `director_ai/${projectId}/videos`,
-            public_id: `scene_${sceneNumber}_video`,
-            overwrite: true
-          });
-          cloudinaryUrl = uploadResult.secure_url;
-        } catch (cloudinaryError) {
-          console.error("Cloudinary Upload Error:", cloudinaryError);
-          return NextResponse.json({ error: "Video generated, but failed to save to cloud storage." }, { status: 500 });
-        }
-
-        // --- MONGODB UPDATE LOGIC ---
-        await dbConnect();
-        const numericSceneNumber = Number(sceneNumber);
-
-        const updatedProject = await Project.findOneAndUpdate(
-          { 
-            _id: projectId, 
-            "storyboard.scene_number": numericSceneNumber 
-          },
-          { $set: { "storyboard.$.video_url": cloudinaryUrl } },
-          { new: true }
-        );
-
-        if (!updatedProject) {
-          console.error(`🚨 Failed to update DB for project ${projectId}`);
-          return NextResponse.json({ error: "DB update failed" }, { status: 500 });
-        }
-
-        console.log(`✅ Video saved for Scene ${numericSceneNumber}: ${cloudinaryUrl}`);
-        return NextResponse.json({ status: "success", videoUrl: cloudinaryUrl });
-
-      } else if (statusData.status === "FAILED") {
-        return NextResponse.json({ 
-          error: "Video generation failed on provider side", 
-          details: statusData.reason || "Unknown provider error." 
-        }, { status: 400 });
-      } else {
-        // Pending states: "IN_PROGRESS", "PENDING", etc.
-        return NextResponse.json({ status: "pending" });
-      }
-    }
-
-    // -----------------------------------------------------------------
-    // CASE 2: SUBMITTING THE INTERPOLATION TASK
-    // -----------------------------------------------------------------
-    const { start_image, end_image, prompt, videoModel, projectId } = body;
-    
-    if (!start_image) return NextResponse.json({ error: "Start frame is required to animate." }, { status: 400 });
-
-    // --- PROMPT ENGINEERING FOR CINEMATIC CONTINUITY ---
     await dbConnect();
-    const project = await Project.findById(projectId);
-    const globalStyle = project?.visualMetadata?.style || "cinematic";
-    const globalLighting = project?.visualMetadata?.lighting || "dramatic lighting";
+    
+    // 1. Get ALL Keys and Preferences from headers
+    const seedanceKey = req.headers.get("X-Seedance-API-Key");
+    const hfKey = req.headers.get("X-HF-API-Key");
+    const hfVideoModel = req.headers.get("X-Video-Model") || "stabilityai/stable-video-diffusion-img2vid-xt";
 
-    // We build a highly restrictive prompt that forces the AI to focus on the *transition* // rather than inventing new elements.
-    let enhancedPrompt = `
-      Cinematic Sequence. ${globalStyle}, ${globalLighting}.
-      Action: ${prompt}.
-      Camera: Smooth cinematic motion, stable shot, no morphing, maintain subject consistency.
-    `.replace(/\s+/g, " ").trim();
+    const { prompt, projectId, sceneNumber, startFrameUrl } = await req.json();
 
-    // If an end_image is provided, we explicitly instruct the model to interpolate.
-    if (end_image) {
-      enhancedPrompt += " Smoothly transition the subject and camera to match the final keyframe exactly.";
+    if (!startFrameUrl) {
+      return NextResponse.json({ error: "Start Frame is required for I2V." }, { status: 400 });
     }
 
-    console.log(`🎥 Submitting Video Task:`, enhancedPrompt);
+    let lastError = "";
+    let finalVideoUrl = null;
 
-    const payload: any = {
-      model: "Wan-AI/Wan2.2-I2V-A14B", // Use Wan2.1 or Kling for best I2V results
-      prompt: enhancedPrompt,
-      image: start_image, 
-    };
-
-    // Attach the end keyframe if this is an interpolation shot
-    if (end_image) {
-      // Note: Check SiliconFlow documentation for the exact key. Usually it's 'image_end' or 'end_image' for Kling/Wan
-      payload.image_end = end_image; 
-    }
-
-    const submitRes = await fetch("https://api.siliconflow.com/v1/video/submit", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${userSfKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!submitRes.ok) {
-      const errText = await submitRes.text();
-      console.error("SiliconFlow Submit Error:", errText);
-
-      // Granular Error Catching for UI
-      if (submitRes.status === 401 || submitRes.status === 402 || submitRes.status === 403) {
-         return NextResponse.json({ error: "SiliconFlow API Key invalid or out of credits. Check Settings." }, { status: submitRes.status });
-      }
-      if (submitRes.status === 429) {
-         return NextResponse.json({ error: "Too many video requests. Please wait." }, { status: 429 });
-      }
-      
-      // Attempt to parse safety filter blocks
+    // ==========================================
+    // TIER 1: SEEDANCE (Asynchronous - Premium)
+    // ==========================================
+    if (seedanceKey) {
       try {
-         const parsedErr = JSON.parse(errText);
-         if (parsedErr.message && parsedErr.message.toLowerCase().includes("sensitive")) {
-            return NextResponse.json({ error: "Safety Filter Triggered: Please adjust the prompt to be PG-13." }, { status: 400 });
-         }
-      } catch(e) {}
+        console.log(`🎥 [TIER 1] Initiating Seedance Render for Scene ${sceneNumber}...`);
+        
+        const payload = {
+          input: {
+            image: startFrameUrl,
+            prompt: `${prompt}. Cinematic motion, high quality, realistic.`,
+            resolution: "720p",
+            length: 5,
+            aspectRatio: "16:9",
+            cameraFixed: false,
+            generateAudio: true 
+          }
+        };
 
-      return NextResponse.json({ error: "Failed to start video generation" }, { status: submitRes.status });
+        const response = await fetch("https://pollo.ai/api/platform/generation/bytedance/seedance-1-5-pro", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-api-key": seedanceKey },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.taskId) {
+          await Project.findOneAndUpdate(
+            { _id: projectId, "storyboard.scene_number": sceneNumber },
+            { $set: { "storyboard.$.video_task_id": data.taskId } }
+          );
+          return NextResponse.json({ taskId: data.taskId, status: "waiting", provider: "seedance" });
+        } else {
+          throw new Error(data.error || `HTTP ${response.status}`);
+        }
+      } catch (seedanceError: any) {
+        console.warn(`⚠️ Seedance Failed (${seedanceError.message}). Falling back to Tier 2...`);
+        lastError = seedanceError.message;
+      }
     }
 
-    const submitData = await submitRes.json();
-    return NextResponse.json({ requestId: submitData.requestId });
+    // ==========================================
+    // TIER 2: HUGGING FACE LOOP (Synchronous - Free Tier)
+    // ==========================================
+    if (hfKey && !finalVideoUrl) {
+      const fallbackChain = [
+        hfVideoModel, // Try user's preferred model first
+        "ali-vilab/i2vgen-xl" // Lighter model, sometimes available on free tier
+      ];
+
+      for (const model of fallbackChain) {
+        try {
+          console.log(`🚀 [TIER 2] Attempting Hugging Face Video: ${model}...`);
+
+          const imageRes = await fetch(startFrameUrl);
+          const imageBuffer = await imageRes.arrayBuffer();
+
+          const hfResponse = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${hfKey}` },
+            body: Buffer.from(imageBuffer)
+          });
+
+          if (!hfResponse.ok) {
+            const hfErrorData = await hfResponse.json().catch(() => ({}));
+            throw new Error(`HF Error (${model}): ${hfErrorData.error || hfResponse.statusText}`);
+          }
+
+          const videoArrayBuffer = await hfResponse.arrayBuffer();
+          const videoBuffer = Buffer.from(videoArrayBuffer);
+
+          finalVideoUrl = await new Promise<string>((resolve, reject) => {
+            const uploadStream = cloudinary.uploader.upload_stream(
+              { resource_type: "video", folder: `director_ai/${projectId}/videos`, public_id: `scene_${sceneNumber}_video`, overwrite: true }, 
+              (error, result) => {
+                if (error) reject(error);
+                else resolve(result!.secure_url);
+              }
+            );
+            uploadStream.end(videoBuffer);
+          });
+
+          console.log(`✅ Success with HF Model: ${model}`);
+          break; // Break the loop if successful
+
+        } catch (hfError: any) {
+          console.warn(`⚠️ Failed ${model}: ${hfError.message}`);
+          lastError = hfError.message;
+        }
+      }
+    }
+
+    // ==========================================
+    // TIER 3: THE CLOUDINARY "KEN BURNS" FAILSAFE
+    // ==========================================
+    if (!finalVideoUrl) {
+      console.log(`🚨 Tiers 1 & 2 Overloaded. Triggering Cloudinary Ken Burns Failsafe...`);
+      
+      // If the URL is already a Cloudinary image, we rewrite it into a Zoom/Pan MP4
+      if (startFrameUrl.includes('cloudinary.com') && startFrameUrl.includes('/image/upload/')) {
+        finalVideoUrl = startFrameUrl
+          // Inject the cinematic zoom-pan transformation
+          .replace('/upload/', '/upload/e_zoompan/')
+          // Change the file extension from image to video
+          .replace(/\.(png|jpg|jpeg|webp)$/i, '.mp4');
+          
+        console.log(`✅ Failsafe Synthesized: ${finalVideoUrl}`);
+      } else {
+         return NextResponse.json({ error: `Total generator failure. Providers down, and Start Frame is not hosted on Cloudinary.` }, { status: 500 });
+      }
+    }
+
+    // ==========================================
+    // SAVE FINAL STATE
+    // ==========================================
+    await Project.findOneAndUpdate(
+      { _id: projectId, "storyboard.scene_number": sceneNumber },
+      { $set: { "storyboard.$.video_url": finalVideoUrl } },
+      { returnDocument: 'after' }
+    );
+    
+    return NextResponse.json({ videoUrl: finalVideoUrl, status: "completed", provider: "fallback" });
 
   } catch (error: any) {
-    console.error("🔥 Fatal Video Server Error:", error);
-    return NextResponse.json({ error: "An unexpected internal server error occurred." }, { status: 500 });
+    console.error("🔥 Fatal Error in Video Pipeline:", error.message);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

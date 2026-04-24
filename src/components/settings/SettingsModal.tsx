@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Key, Cpu, Image as ImageIcon, Video, Save, Check, MessageSquare, Workflow, Zap, ShieldAlert } from "lucide-react";
+import { X, Key, Cpu, Image as ImageIcon, Video, Save, Check, MessageSquare, Workflow, Zap, ShieldAlert, Film } from "lucide-react";
 
 type SettingsModalProps = {
   isOpen: boolean;
@@ -11,8 +11,9 @@ type SettingsModalProps = {
 export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   // --- STATES FOR BYOK (Bring Your Own Key) ---
   const [nvidiaKey, setNvidiaKey] = useState("");
-  const [googleKey, setGoogleKey] = useState(""); // NEW: For Tier 1 Nano Banana / Gemini
+  const [googleKey, setGoogleKey] = useState(""); 
   const [hfKey, setHfKey] = useState("");
+  const [seedanceKey, setSeedanceKey] = useState(""); // NEW: Seedance API Key
   
   // --- STATES FOR MODEL ROUTING ---
   const [chatModel, setChatModel] = useState("meta/llama-3.1-70b-instruct");
@@ -27,6 +28,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setNvidiaKey(localStorage.getItem("nvidia_api_key") || "");
       setGoogleKey(localStorage.getItem("google_api_key") || "");
       setHfKey(localStorage.getItem("hf_api_key") || "");
+      setSeedanceKey(localStorage.getItem("seedance_api_key") || ""); // Load Seedance Key
       
       setChatModel(localStorage.getItem("nvidia_chat_model") || "meta/llama-3.1-70b-instruct");
       setImageModel(localStorage.getItem("hf_image_model") || "stabilityai/stable-diffusion-xl-base-1.0");
@@ -39,6 +41,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     localStorage.setItem("nvidia_api_key", nvidiaKey.trim());
     localStorage.setItem("google_api_key", googleKey.trim());
     localStorage.setItem("hf_api_key", hfKey.trim());
+    localStorage.setItem("seedance_api_key", seedanceKey.trim()); // Save Seedance Key
     
     localStorage.setItem("nvidia_chat_model", chatModel);
     localStorage.setItem("hf_image_model", imageModel);
@@ -130,13 +133,13 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             </div>
           </div>
 
-          {/* SECTION 3: HUGGING FACE (Tier 2 Fallback & Video) */}
+          {/* SECTION 3: HUGGING FACE (Tier 2 Fallbacks) */}
           <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-5 space-y-4 hover:border-pink-500/30 transition-colors relative overflow-hidden">
             <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none"><Workflow className="w-32 h-32" /></div>
 
             <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2 border-b border-zinc-800/80 pb-3 relative z-10">
               <ShieldAlert className="w-4 h-4 text-pink-400" /> 
-              Tier 2 Fallbacks & Video Engine (Hugging Face)
+              Tier 2 Fallbacks & Video Engines (Hugging Face)
             </h3>
             
             <div className="space-y-2 relative z-10">
@@ -164,16 +167,35 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
               <div className="space-y-2">
                 <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-2">
-                  <Video className="w-3 h-3 text-teal-400" /> Image-to-Video Engine
+                  <Video className="w-3 h-3 text-pink-400" /> Fallback Video Engine
                 </label>
                 <select 
                   value={videoModel} onChange={(e) => setVideoModel(e.target.value)}
-                  className="w-full bg-[#0a0a0c] border border-zinc-800 rounded-xl px-4 py-3 text-[13px] text-white focus:outline-none focus:border-teal-500 appearance-none cursor-pointer shadow-inner"
+                  className="w-full bg-[#0a0a0c] border border-zinc-800 rounded-xl px-4 py-3 text-[13px] text-white focus:outline-none focus:border-pink-500 appearance-none cursor-pointer shadow-inner"
                 >
                   <option value="stabilityai/stable-video-diffusion-img2vid-xt">SVD XT (Stable)</option>
                   <option value="ali-vilab/i2vgen-xl">I2VGen-XL (High Motion)</option>
                 </select>
               </div>
+            </div>
+          </div>
+
+          {/* NEW SECTION 4: SEEDANCE (Primary Video Engine) */}
+          <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-5 space-y-4 hover:border-teal-500/30 transition-colors relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none"><Film className="w-32 h-32" /></div>
+            
+            <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2 border-b border-zinc-800/80 pb-3 relative z-10">
+              <Film className="w-4 h-4 text-teal-400" /> 
+              Primary Video Engine (Seedance AI)
+            </h3>
+            <p className="text-[11px] text-teal-500/80 font-medium pb-1 relative z-10">Powers asynchronous high-fidelity cinematic video and spatial audio synthesis.</p>
+
+            <div className="space-y-2 relative z-10">
+              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Seedance API Key</label>
+              <input 
+                type="password" value={seedanceKey} onChange={(e) => setSeedanceKey(e.target.value)} placeholder="Enter Seedance / Pollo API Key..."
+                className="w-full bg-[#0a0a0c] border border-zinc-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-all font-mono shadow-inner"
+              />
             </div>
           </div>
 

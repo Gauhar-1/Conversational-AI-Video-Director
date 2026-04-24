@@ -64,68 +64,72 @@ export function useStoryboard(activeProjectId: string | null) {
     }
   }, [activeProjectId]);
 
-  // --- VIDEO COMPILATION HANDLER ---
-  const generateVideo = useCallback(async (sceneNumber: number, dependencies: { startImage?: string, bgImage?: string, charImages: string[], videoPrompt: string }) => {
-    if (!activeProjectId) return;
-    const videoNodeId = `video-${sceneNumber}`;
+const generateVideo = useCallback(async (sceneNumber: number, prompt: string, startFrameUrl: string) => {
+  const seedanceKey = localStorage.getItem("seedance_api_key");
+  const hfKey = localStorage.getItem("hf_api_key");
+  const hfVideoModel = localStorage.getItem("hf_video_model") || "stabilityai/stable-video-diffusion-img2vid-xt";
+  
+  const nodeId = `video-${sceneNumber}`;
 
-    if (!dependencies.startImage || !dependencies.bgImage || dependencies.charImages.length === 0) {
-      return alert("Missing dependencies! Ensure Start Frame, Background, and at least 1 Character are generated.");
+  setGeneratingAssets(prev => ({ ...prev, [nodeId]: true }));
+
+  try {
+    const res = await fetch('/api/generate-video', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-Seedance-API-Key': seedanceKey || "",
+        'X-HF-API-Key': hfKey || "",
+        'X-Video-Model': hfVideoModel
+      },
+      body: JSON.stringify({ prompt, projectId: activeProjectId, sceneNumber, startFrameUrl })
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to generate video");
+
+    // ==========================================
+    // PATH A: TIER 2 FINISHED IT INSTANTLY
+    // ==========================================
+    if (data.videoUrl) {
+       setGeneratedVideos(prev => ({ ...prev, [sceneNumber]: data.videoUrl }));
+       return; // Exit early, no polling needed!
     }
 
-    const hfKey = localStorage.getItem("hf_api_key");
-    if (!hfKey) return setAssetErrors(prev => ({ ...prev, [videoNodeId]: "Missing HF Key" }));
+    // ==========================================
+    // PATH B: TIER 1 GAVE US A TASK ID (Start Polling)
+    // ==========================================
+    const taskId = data.taskId;
+    if (!taskId) throw new Error("Failed to get Task ID from Seedance");
 
-    setGeneratingAssets(prev => ({ ...prev, [videoNodeId]: true }));
-    setAssetErrors(prev => ({ ...prev, [videoNodeId]: "" }));
+    let isFinished = false;
+    let finalVideoUrl = "";
 
-    try {
-      const submitRes = await fetch("/api/generate-video", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${hfKey}` },
-        body: JSON.stringify({ 
-          start_image: dependencies.startImage, 
-          background_image: dependencies.bgImage,
-          character_images: dependencies.charImages, 
-          prompt: dependencies.videoPrompt, // Use the dynamically edited prompt!
-          videoModel: localStorage.getItem("hf_video_model"),
-          projectId: activeProjectId,
-          sceneNumber
-        })
+    while (!isFinished) {
+      await new Promise(resolve => setTimeout(resolve, 3000)); // Poll every 3 seconds
+      
+      const statusRes = await fetch(`/api/generate-video/status/${taskId}`, {
+        headers: { 'X-Seedance-API-Key': seedanceKey || "" }
       });
+      const statusData = await statusRes.json();
 
-      const submitData = await submitRes.json();
-      if (!submitRes.ok) throw new Error(submitData.error);
-
-      const pollInterval = setInterval(async () => {
-        try {
-          const pollRes = await fetch("/api/generate-video", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${hfKey}` },
-            body: JSON.stringify({ requestId: submitData.requestId, projectId: activeProjectId, sceneNumber })
-          });
-          const pollData = await pollRes.json();
-
-          if (pollData.status === "success") {
-            clearInterval(pollInterval);
-            setGeneratedVideos(prev => ({ ...prev, [videoNodeId]: pollData.videoUrl }));
-            setGeneratingAssets(prev => ({ ...prev, [videoNodeId]: false }));
-          } else if (pollData.error) {
-            clearInterval(pollInterval);
-            throw new Error(pollData.error);
-          }
-        } catch (e: any) {
-          clearInterval(pollInterval);
-          setGeneratingAssets(prev => ({ ...prev, [videoNodeId]: false }));
-          setAssetErrors(prev => ({ ...prev, [videoNodeId]: e.message }));
-        }
-      }, 5000);
-
-    } catch (e: any) {
-      setGeneratingAssets(prev => ({ ...prev, [videoNodeId]: false }));
-      setAssetErrors(prev => ({ ...prev, [videoNodeId]: e.message }));
+      if (statusData.status === "completed" || statusData.videoUrl) {
+        finalVideoUrl = statusData.videoUrl;
+        isFinished = true;
+      } else if (statusData.status === "failed") {
+        throw new Error("Seedance video generation failed internally.");
+      }
     }
-  }, [activeProjectId]);
+
+    setGeneratedVideos(prev => ({ ...prev, [sceneNumber]: finalVideoUrl }));
+
+  } catch (err: any) {
+    setAssetErrors(prev => ({ ...prev, [nodeId]: err.message }));
+  } finally {
+    setGeneratingAssets(prev => ({ ...prev, [nodeId]: false }));
+  }
+}, [activeProjectId]);
+
 
   // --- COMPLETED: SAVE OVERRIDES HANDLER ---
   const saveOverrides = useCallback(async (sceneNumber: number, type: string, idOrPrompt: string, newPrompt?: string, referenceImage?: string | null, generatedUrl?: string | null) => {

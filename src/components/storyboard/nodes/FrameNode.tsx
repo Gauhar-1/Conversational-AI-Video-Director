@@ -1,7 +1,7 @@
 // Inside src/components/storyboard/nodes/FrameNode.tsx
 import { memo, useState, useRef } from "react";
 import { Handle, Position, NodeProps } from '@xyflow/react';
-import { ImageIcon, Loader2, AlertCircle, Edit2, Save, X, ImagePlus } from "lucide-react";
+import { ImageIcon, Loader2, AlertCircle, Edit2, Save, X, ImagePlus, Upload } from "lucide-react";
 
 export const FrameNode = memo(({ data }: NodeProps) => {
   const { scene, prompt, imageUrl, isGenerating, error, onGenerate, onSaveEdit } = data as any;
@@ -12,8 +12,9 @@ export const FrameNode = memo(({ data }: NodeProps) => {
   const [referenceImage, setReferenceImage] = useState<string | null>(scene?.frame_reference_image || null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const directUploadRef = useRef<HTMLInputElement>(null); // NEW: Ref for direct frame upload
 
-  // --- FILE UPLOAD HANDLER (Base64 Conversion) ---
+  // --- FILE UPLOAD HANDLER (Img2Img Reference) ---
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -25,9 +26,24 @@ export const FrameNode = memo(({ data }: NodeProps) => {
     }
   };
 
+  // --- DIRECT FRAME UPLOAD HANDLER (Bypass Generation) ---
+  const handleDirectFrameUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64Image = reader.result as string;
+        // Pass the base64 image as the `generatedUrl` to instantly save it as the final frame
+        if (onSaveEdit) {
+          onSaveEdit(scene?.scene_number, 'frame', 'frame', editedPrompt, referenceImage, base64Image);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   // --- SAVE OVERRIDES HANDLER ---
   const handleSave = () => {
-    // Passes scene number, node type, a placeholder ID ('frame'), new prompt, and base64 reference
     if (onSaveEdit) {
       onSaveEdit(scene?.scene_number, 'frame', 'frame', editedPrompt, referenceImage);
     }
@@ -37,9 +53,7 @@ export const FrameNode = memo(({ data }: NodeProps) => {
   return (
     <div className="relative group/node w-[350px]">
       
-      {/* INPUT HANDLE (Temporal Link): 
-        Only scenes > 1 have a left handle, to receive the video from the previous scene. 
-      */}
+      {/* INPUT HANDLE (Temporal Link) */}
       {scene?.scene_number > 1 && (
         <Handle 
           type="target" 
@@ -49,8 +63,9 @@ export const FrameNode = memo(({ data }: NodeProps) => {
         />
       )}
 
+      {/* Outer Glow (Subtle) */}
       {isGenerating && (
-        <div className="absolute -inset-1.5 bg-gradient-to-r from-indigo-500 to-blue-500 rounded-2xl blur-md opacity-75 animate-pulse z-0" />
+        <div className="absolute -inset-1.5 bg-gradient-to-r from-indigo-500 to-blue-500 rounded-2xl blur-md opacity-50 animate-pulse z-0" />
       )}
 
       <div className="relative bg-zinc-900/95 border border-zinc-700/80 rounded-2xl overflow-hidden shadow-2xl z-10 flex flex-col transition-all duration-300 hover:border-indigo-500/50">
@@ -90,15 +105,8 @@ export const FrameNode = memo(({ data }: NodeProps) => {
                   placeholder="Describe composition to merge characters and background..."
                 />
                 
-                {/* Reference Image Upload */}
                 <div className="flex items-center gap-2">
-                  <input 
-                    type="file" 
-                    accept="image/*" 
-                    className="hidden" 
-                    ref={fileInputRef} 
-                    onChange={handleImageUpload} 
-                  />
+                  <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
                   <button 
                     onClick={() => fileInputRef.current?.click()}
                     className="flex-1 flex items-center justify-center gap-1.5 py-1.5 border border-dashed border-zinc-600 hover:border-indigo-500/50 bg-zinc-900 hover:bg-zinc-800 rounded-lg text-[10px] text-zinc-400 hover:text-zinc-200 transition-colors"
@@ -132,21 +140,34 @@ export const FrameNode = memo(({ data }: NodeProps) => {
            )}
         </div>
 
-        {/* --- VISUAL CANVAS --- */}
-        <div className="relative w-full aspect-square bg-black flex items-center justify-center overflow-hidden">
+        {/* --- VISUAL CANVAS (WITH INTENSE GLOW) --- */}
+        <div className={`relative w-full aspect-square bg-black flex items-center justify-center overflow-hidden transition-all duration-500 ${
+          isGenerating ? "ring-2 ring-indigo-500 ring-offset-2 ring-offset-zinc-950 shadow-[inset_0_0_50px_rgba(99,102,241,0.4)]" : ""
+        }`}>
+          
           {imageUrl ? (
-            <img src={imageUrl} alt={`Frame ${scene?.scene_number}`} className="w-full h-full object-cover" />
-          ) : isGenerating ? (
-            <div className="flex flex-col items-center gap-2 text-indigo-500">
-              <Loader2 className="w-6 h-6 animate-spin" />
-              <span className="text-xs font-semibold animate-pulse">Rendering...</span>
-            </div>
-          ) : (
+            <img 
+              src={imageUrl} 
+              alt={`Frame ${scene?.scene_number}`} 
+              className={`w-full h-full object-cover transition-all duration-700 ${isGenerating ? 'opacity-40 scale-105 blur-[2px]' : 'opacity-100 scale-100'}`} 
+            />
+          ) : isGenerating ? null : (
             <div className="flex flex-col items-center text-zinc-600">
               <ImageIcon className="w-10 h-10 opacity-40 mb-3" />
               <p className="text-xs font-medium text-center px-6">
-                {scene?.scene_number === 1 ? "Awaiting Generation." : "Awaiting Temporal Link."}
+                {scene?.scene_number === 1 ? "Upload or Render Frame." : "Awaiting Temporal Link."}
               </p>
+            </div>
+          )}
+
+          {/* Glowing Loading Overlay */}
+          {isGenerating && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/40 backdrop-blur-sm z-10">
+              <div className="relative">
+                <div className="absolute inset-0 bg-indigo-500 blur-xl opacity-60 animate-pulse"></div>
+                <Loader2 className="w-8 h-8 text-indigo-400 animate-spin relative z-10" />
+              </div>
+              <span className="text-xs font-bold text-indigo-300 tracking-widest uppercase animate-pulse">Rendering...</span>
             </div>
           )}
 
@@ -159,21 +180,34 @@ export const FrameNode = memo(({ data }: NodeProps) => {
             </div>
           )}
 
-          {/* --- ACTION BUTTON --- */}
-          <div className={`absolute bottom-3 right-3 transition-opacity z-20 ${imageUrl && !isEditing ? 'opacity-0 group-hover/node:opacity-100' : 'opacity-100'}`}>
+          {/* --- ACTION BUTTONS --- */}
+          <div className={`absolute bottom-3 right-3 flex items-center gap-2 transition-opacity duration-300 z-20 ${imageUrl && !isEditing ? 'opacity-0 group-hover/node:opacity-100' : 'opacity-100'}`}>
+            
+            {/* Hidden Input for Direct Upload */}
+            <input type="file" accept="image/*" className="hidden" ref={directUploadRef} onChange={handleDirectFrameUpload} />
+            
+            <button 
+              onClick={() => directUploadRef.current?.click()} 
+              disabled={isGenerating || isEditing}
+              className="flex items-center gap-2 bg-zinc-800/80 hover:bg-zinc-700 text-zinc-200 px-3 py-2 rounded-lg text-xs font-bold backdrop-blur-md border border-zinc-600/50 disabled:opacity-50 transition-all shadow-lg"
+              title="Upload custom frame directly"
+            >
+              <Upload className="w-4 h-4" />
+            </button>
+
             <button 
               onClick={() => onGenerate(editedPrompt, referenceImage)} 
               disabled={isGenerating || isEditing}
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-[0_0_15px_rgba(99,102,241,0.5)] disabled:opacity-50 transition-all backdrop-blur-md border border-indigo-400/50"
+              className="flex items-center gap-2 bg-indigo-600/90 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-[0_0_20px_rgba(99,102,241,0.6)] disabled:opacity-50 transition-all backdrop-blur-md border border-indigo-400/50"
             >
               {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
-              {imageUrl ? "Regenerate" : "Render Frame"}
+              {imageUrl ? "Regenerate" : "Render"}
             </button>
           </div>
         </div>
       </div>
 
-      {/* OUTPUT HANDLE: Connects to the Left side of the Video Node. */}
+      {/* OUTPUT HANDLE */}
       <Handle 
         type="source" 
         position={Position.Right} 
