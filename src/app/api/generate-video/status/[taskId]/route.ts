@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 
-export async function GET(req: Request, { params }: { params: { taskId: string } }) {
+// CRITICAL FIX: The type definition is now Promise<{ taskId: string }>
+export async function GET(req: Request, { params }: { params: Promise<{ taskId: string }> }) {
   const seedanceKey = req.headers.get("X-Seedance-API-Key");
-  const { taskId } = params;
+
+  // Awaiting the promised params
+  const resolvedParams = await params;
+  const taskId = resolvedParams.taskId;
 
   try {
     const response = await fetch(`https://pollo.ai/api/platform/task/${taskId}`, {
