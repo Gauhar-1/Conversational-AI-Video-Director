@@ -13,6 +13,7 @@ import { VideoNode } from "./nodes/VideoNode";
 import { CharacterNode } from "./nodes/CharacterNode";
 import { BackgroundNode } from "./nodes/BackgroundNode";
 import { useStoryboard } from "./hooks/useStoryBoard";
+import { DIRECTOR_MODELS } from "@/config/modelRegistry";
 
 export default function StoryboardCanvas({ activeProjectId, isExpanded, onExpand }: { activeProjectId: string | null, isExpanded: boolean, onExpand: (expanded: boolean) => void }) {
 
@@ -24,6 +25,7 @@ export default function StoryboardCanvas({ activeProjectId, isExpanded, onExpand
   const [currentPlayIndex, setCurrentPlayIndex] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
+  const [activeEdgeRules, setActiveEdgeRules] = useState<{ sceneNumber: number, requiredNodes: string[] } | null>(null);
 
   const nodeTypes = useMemo(() => ({ 
     frameNode: FrameNode, 
@@ -115,7 +117,24 @@ export default function StoryboardCanvas({ activeProjectId, isExpanded, onExpand
       const characters = scene.characters?.length ? scene.characters : [{ _id: 'char-1', name: 'Main Subject', appearance_prompt: 'Character ref' }];
       const videoNodeId = `video-${scene.scene_number}`;
 
-      const marker = (color: string) => ({ type: MarkerType.ArrowClosed, color });
+     // Check if THIS scene is currently in Edit Mode
+      const isEditingThisScene = activeEdgeRules?.sceneNumber === scene.scene_number;
+      const requiredNodes = activeEdgeRules?.requiredNodes || [];
+
+      // Dynamic Edge Styler
+      const getEdgeStyle = (nodeType: string, baseColor: string) => {
+        // If no scene is being edited, return standard neutral edges
+        if (!activeEdgeRules) return { stroke: baseColor, strokeWidth: 2, opacity: 0.6, filter: 'none' };
+        
+        // If a scene IS being edited, but it's not THIS one, dim it out to focus the user
+        if (!isEditingThisScene) return { stroke: baseColor, strokeWidth: 1, opacity: 0.1, filter: 'none' };
+
+        // If this scene IS being edited, apply Glow/Dim based on the model's requirements
+        const isRequired = requiredNodes.includes(nodeType);
+        return isRequired 
+          ? { stroke: '#fff', strokeWidth: 4, opacity: 1, filter: `drop-shadow(0 0 10px ${baseColor})` } // GLOW ACTIVE
+          : { stroke: baseColor, strokeWidth: 1, opacity: 0.1, filter: 'none' }; // DIM INACTIVE
+      };
 
       // 1. LEFT: Start Frame Node
       const startNodeId = `start-${scene.scene_number}`;
@@ -135,7 +154,7 @@ export default function StoryboardCanvas({ activeProjectId, isExpanded, onExpand
           onSaveEdit: saveOverrides
         }
       });
-      newEdges.push({ id: `e-${startNodeId}-v`, source: startNodeId, sourceHandle: 'right', target: videoNodeId, targetHandle: 'left', type: 'smoothstep', animated: true, style: { stroke: '#6366f1', strokeWidth: 2 }, markerEnd: marker('#6366f1') });
+      newEdges.push({ id: `e-${startNodeId}-v`, source: startNodeId, sourceHandle: 'right', target: videoNodeId, targetHandle: 'left', type: 'smoothstep', animated: true, style: getEdgeStyle('startFrame', '#6366f1'), });
 
       const nodeWidth = 288; 
       const gap = 100;
@@ -161,7 +180,7 @@ export default function StoryboardCanvas({ activeProjectId, isExpanded, onExpand
           }
         });
 
-        newEdges.push({ id: `e-${charNodeId}-v`, source: charNodeId, sourceHandle: 'bottom', target: videoNodeId, targetHandle: 'top', type: 'smoothstep', animated: true, style: { stroke: '#ec4899', strokeWidth: 2 }, markerEnd: marker('#ec4899') });
+        newEdges.push({ id: `e-${charNodeId}-v`, source: charNodeId, sourceHandle: 'bottom', target: videoNodeId, targetHandle: 'top', type: 'smoothstep', animated: true, style: getEdgeStyle('character', '#ec4899') });
       });
 
       // 3. BOTTOM: Background Node
@@ -169,7 +188,7 @@ export default function StoryboardCanvas({ activeProjectId, isExpanded, onExpand
       newNodes.push({
         id: bgNodeId,
         type: 'backgroundNode',
-        position: { x: baseX + videoOffsetX / 2, y: yCenter + 250 },
+        position: { x: baseX + videoOffsetX / 2, y: yCenter + 600 },
         data: { 
           scene, prompt: scene.environment_prompt,
           imageUrl: generatedBgs[bgNodeId] || scene.background_url,
@@ -181,7 +200,7 @@ export default function StoryboardCanvas({ activeProjectId, isExpanded, onExpand
           onSaveEdit: saveOverrides
         }
       });
-      newEdges.push({ id: `e-${bgNodeId}-v`, source: bgNodeId, sourceHandle: 'top', target: videoNodeId, targetHandle: 'bottom', type: 'smoothstep', animated: true, style: { stroke: '#fbbf24', strokeWidth: 2 }, markerEnd: marker('#fbbf24') });
+      newEdges.push({ id: `e-${bgNodeId}-v`, source: bgNodeId, sourceHandle: 'top', target: videoNodeId, targetHandle: 'bottom', type: 'smoothstep', animated: true, style: getEdgeStyle('background', '#fbbf24') });
 
       // 4. CENTER: Video Node
       newNodes.push({
@@ -190,12 +209,30 @@ export default function StoryboardCanvas({ activeProjectId, isExpanded, onExpand
         position: { x: baseX + videoOffsetX , y: yCenter  },
         data: { 
           scene, prompt: scene.video_prompt,
+          setActiveEdgeRules,
           videoUrl: generatedVideos[scene.scene_number] || scene.video_url,
           isGenerating: !!generatingAssets[videoNodeId],
           error: assetErrors[videoNodeId],
-          onGenerate: (localPrompt: string) => generateVideo(
-            scene.scene_number, localPrompt, generatedFrames[startNodeId] || scene.frame_url
-          ),
+          onGenerate: (localPrompt: string, selectedModel: string) => {
+            // 1. Gather all currently generated or saved assets for this scene
+            const startFrame = generatedFrames[startNodeId] || scene.frame_url;
+            const bgFrame = generatedBgs[bgNodeId] || scene.background_url;
+            
+            // Map through characters to get all active character URLs
+            const charUrls = characters.map((c: any) => {
+              const charId = `char-${c._id}-${scene.scene_number}`;
+              return generatedChars[charId] || c.generated_url;
+            }).filter(Boolean); // Remove nulls/undefined
+
+            // 2. Build the advancedInputs payload
+            const advancedPayload: any = {};
+            if (startFrame) advancedPayload.startFrameUrl = startFrame;
+            if (bgFrame) advancedPayload.backgroundReferenceUrl = bgFrame;
+            if (charUrls.length > 0) advancedPayload.characterReferenceUrls = charUrls;
+
+            // 3. Fire the hook
+            generateVideo(scene.scene_number, localPrompt, selectedModel, advancedPayload);
+          },
           onSaveEdit: saveOverrides
         }
       });
@@ -204,14 +241,14 @@ export default function StoryboardCanvas({ activeProjectId, isExpanded, onExpand
       if (index < storyboard.length - 1) {
         const nextScene = storyboard[index + 1];
         newEdges.push({
-          id: `e-temporal-${scene.scene_number}`, source: videoNodeId, sourceHandle: 'right', target: `start-${nextScene.scene_number}`, targetHandle: 'left', type: 'smoothstep', animated: true, style: { stroke: '#14b8a6', strokeWidth: 4 }, markerEnd: marker('#14b8a6')
+          id: `e-temporal-${scene.scene_number}`, source: videoNodeId, sourceHandle: 'right', target: `start-${nextScene.scene_number}`, targetHandle: 'left', type: 'smoothstep', animated: true, style: getEdgeStyle('background', '#14b8a6')
         });
       }
     });
 
     setNodes(newNodes);
     setEdges(newEdges);
-  }, [storyboard, generatedFrames, generatedChars, generatedBgs, generatedVideos, generatingAssets, assetErrors]);
+  }, [storyboard, generatedFrames, generatedChars, generatedBgs, generatedVideos, generatingAssets, assetErrors,activeEdgeRules]);
 
 
   const containerClasses = isExpanded 

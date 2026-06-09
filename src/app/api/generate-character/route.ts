@@ -72,7 +72,7 @@ export async function POST(req: Request) {
     }
 
     const enhancedPrompt = `
-      Professional 2D character model sheet, white background. 
+      Professional real character model sheet, contrast background to appearance. 
       Multiple views of the same character: Front, side profile, and back view. 
       Bottom row showing various facial expressions (neutral, happy, angry, sad). 
       SUBJECT: ${prompt}. 

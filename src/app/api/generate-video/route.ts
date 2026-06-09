@@ -1,159 +1,107 @@
+// src/app/api/video/generate/route.ts
 import { NextResponse } from "next/server";
-import { v2 as cloudinary } from "cloudinary";
-import { Project } from "@/models/Project";
+import Replicate from "replicate";
 import dbConnect from "@/lib/db";
-
-// Configure Cloudinary for the fallback upload
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
+import { VideoTask } from "@/models/VideoTask";
+import { videoQueue } from "@/lib/queue/videoQueue";
 
 export async function POST(req: Request) {
   try {
     await dbConnect();
     
-    // 1. Get ALL Keys and Preferences from headers
-    const seedanceKey = req.headers.get("X-Seedance-API-Key");
-    const hfKey = req.headers.get("X-HF-API-Key");
-    const hfVideoModel = req.headers.get("X-Video-Model") || "stabilityai/stable-video-diffusion-img2vid-xt";
+    // 1. Extract raw inputs and the Replicate API Key
+    const { 
+      rawPrompt, 
+      projectId, 
+      sceneNumber, 
+      advancedInputs, 
+      userPreference  
+    } = await req.json();
 
-    const { prompt, projectId, sceneNumber, startFrameUrl } = await req.json();
+    const replicateApiKey = req.headers.get("X-Replicate-Key");
 
-    if (!startFrameUrl) {
-      return NextResponse.json({ error: "Start Frame is required for I2V." }, { status: 400 });
+    if (!advancedInputs?.startFrameUrl && !advancedInputs?.characterReferenceUrls) {
+      return NextResponse.json({ error: "At least one visual reference is required." }, { status: 400 });
     }
 
-    let lastError = "";
-    let finalVideoUrl = null;
-
-    // ==========================================
-    // TIER 1: SEEDANCE (Asynchronous - Premium)
-    // ==========================================
-    if (seedanceKey) {
-      try {
-        console.log(`🎥 [TIER 1] Initiating Seedance Render for Scene ${sceneNumber}...`);
-        
-        const payload = {
-          input: {
-            image: startFrameUrl,
-            prompt: `${prompt}. Cinematic motion, high quality, realistic.`,
-            resolution: "720p",
-            length: 5,
-            aspectRatio: "16:9",
-            cameraFixed: false,
-            generateAudio: true 
-          }
-        };
-
-        const response = await fetch("https://pollo.ai/api/platform/generation/bytedance/seedance-1-5-pro", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": seedanceKey },
-          body: JSON.stringify(payload)
-        });
-
-        const data = await response.json();
-
-        if (response.ok && data.taskId) {
-          await Project.findOneAndUpdate(
-            { _id: projectId, "storyboard.scene_number": sceneNumber },
-            { $set: { "storyboard.$.video_task_id": data.taskId } }
-          );
-          return NextResponse.json({ taskId: data.taskId, status: "waiting", provider: "seedance" });
-        } else {
-          throw new Error(data.error || `HTTP ${response.status}`);
-        }
-      } catch (seedanceError: any) {
-        console.warn(`⚠️ Seedance Failed (${seedanceError.message}). Falling back to Tier 2...`);
-        lastError = seedanceError.message;
-      }
+    if (!replicateApiKey) {
+      return NextResponse.json({ error: "Replicate API key is required." }, { status: 401 });
     }
 
-    // ==========================================
-    // TIER 2: HUGGING FACE LOOP (Synchronous - Free Tier)
-    // ==========================================
-    if (hfKey && !finalVideoUrl) {
-      const fallbackChain = [
-        hfVideoModel, // Try user's preferred model first
-        "ali-vilab/i2vgen-xl" // Lighter model, sometimes available on free tier
-      ];
+    // 2. Initialize Replicate specifically for the Agentic Rewriter
+    const replicate = new Replicate({ auth: replicateApiKey });
 
-      for (const model of fallbackChain) {
-        try {
-          console.log(`🚀 [TIER 2] Attempting Hugging Face Video: ${model}...`);
+    // 3. THE AGENTIC REWRITER (Powered by Llama 3 on Replicate)
+    // 3. THE AGENTIC REWRITER (Powered by Llama 3 on Replicate)
+    let enhancedCinematicPrompt = rawPrompt;
 
-          const imageRes = await fetch(startFrameUrl);
-          const imageBuffer = await imageRes.arrayBuffer();
-
-          const hfResponse = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
-            method: "POST",
-            headers: { "Authorization": `Bearer ${hfKey}` },
-            body: Buffer.from(imageBuffer)
-          });
-
-          if (!hfResponse.ok) {
-            const hfErrorData = await hfResponse.json().catch(() => ({}));
-            throw new Error(`HF Error (${model}): ${hfErrorData.error || hfResponse.statusText}`);
-          }
-
-          const videoArrayBuffer = await hfResponse.arrayBuffer();
-          const videoBuffer = Buffer.from(videoArrayBuffer);
-
-          finalVideoUrl = await new Promise<string>((resolve, reject) => {
-            const uploadStream = cloudinary.uploader.upload_stream(
-              { resource_type: "video", folder: `director_ai/${projectId}/videos`, public_id: `scene_${sceneNumber}_video`, overwrite: true }, 
-              (error, result) => {
-                if (error) reject(error);
-                else resolve(result!.secure_url);
-              }
-            );
-            uploadStream.end(videoBuffer);
-          });
-
-          console.log(`✅ Success with HF Model: ${model}`);
-          break; // Break the loop if successful
-
-        } catch (hfError: any) {
-          console.warn(`⚠️ Failed ${model}: ${hfError.message}`);
-          lastError = hfError.message;
-        }
-      }
-    }
-
-    // ==========================================
-    // TIER 3: THE CLOUDINARY "KEN BURNS" FAILSAFE
-    // ==========================================
-    if (!finalVideoUrl) {
-      console.log(`🚨 Tiers 1 & 2 Overloaded. Triggering Cloudinary Ken Burns Failsafe...`);
+    try {
+      console.log(`✍️ [Scene ${sceneNumber}] Enhancing prompt via Replicate (Llama 3)...`);
       
-      // If the URL is already a Cloudinary image, we rewrite it into a Zoom/Pan MP4
-      if (startFrameUrl.includes('cloudinary.com') && startFrameUrl.includes('/image/upload/')) {
-        finalVideoUrl = startFrameUrl
-          // Inject the cinematic zoom-pan transformation
-          .replace('/upload/', '/upload/e_zoompan/')
-          // Change the file extension from image to video
-          .replace(/\.(png|jpg|jpeg|webp)$/i, '.mp4');
-          
-        console.log(`✅ Failsafe Synthesized: ${finalVideoUrl}`);
-      } else {
-         return NextResponse.json({ error: `Total generator failure. Providers down, and Start Frame is not hosted on Cloudinary.` }, { status: 500 });
+      const systemPrompt = `You are the Master Cinematographer for Director AI, an elite video generation engine.
+Take the user's basic scene idea and elevate it into a vivid, award-winning cinematic blueprint.
+Structure output as a single descriptive paragraph.
+Define Subject & Action, Camera Geometry, Lighting, and Lens & Depth.
+Do NOT use narrative prose (e.g., "he feels sad"). Describe the physical manifestation.
+Always append this exact text at the end: "Cinematic masterpiece, award-winning direction, production-grade, 8k resolution, photorealistic, hyper-detailed textures."`;
+
+      const output = await replicate.run(
+        "meta/meta-llama-3-70b-instruct",
+        {
+          input: {
+            prompt: rawPrompt,
+            system_prompt: systemPrompt,
+            max_tokens: 512,
+            temperature: 0.7,
+          }
+        }
+      );
+
+      if (Array.isArray(output)) {
+        enhancedCinematicPrompt = output.join("").trim();
+        console.log(`✅ [Scene ${sceneNumber}] Enhanced Prompt generated.`);
       }
+
+    } catch (llmError) {
+      console.warn("⚠️ Text Enhancement failed. Falling back to Director's Coverage Template.");
+      
+      // GRACEFUL DEGRADATION: The Hardcoded Director's Fail-Safe
+      // This forces the video model to generate editing coverage based on whatever location/characters are in the raw prompt.
+      enhancedCinematicPrompt = `A continuous, multi-angle cinematic coverage sequence of the following scene: "${rawPrompt}". 
+The camera acts as a master cinematographer gathering coverage for post-production editing. It dynamically shifts perspectives, starting with a wide establishing shot of the location to show the environment, then smoothly transitioning into over-the-shoulder (OTS) tracking shots of the characters having a conversation, and finally moving into tight, emotive close-ups of their facial expressions. 
+Cinematic masterpiece, award-winning direction, production-grade, 8k resolution, photorealistic, dramatic lighting, hyper-detailed textures.`;
     }
 
-    // ==========================================
-    // SAVE FINAL STATE
-    // ==========================================
-    await Project.findOneAndUpdate(
-      { _id: projectId, "storyboard.scene_number": sceneNumber },
-      { $set: { "storyboard.$.video_url": finalVideoUrl } },
-      { returnDocument: 'after' }
-    );
-    
-    return NextResponse.json({ videoUrl: finalVideoUrl, status: "completed", provider: "fallback" });
+    // 4. DATABASE: Create the tracking document
+    const task = await VideoTask.create({
+      projectId,
+      sceneNumber,
+      status: "pending",
+      originalPrompt: rawPrompt,
+      enhancedPrompt: enhancedCinematicPrompt,
+      logs: [] 
+    });
+
+    // 5. QUEUE: Push the heavy generation job to the background worker
+    await videoQueue.add("generate-video", {
+      taskId: task._id,
+      prompt: enhancedCinematicPrompt,
+      advancedInputs,
+      userPreference,
+      keys: {
+        replicate: replicateApiKey // Pass the key to the background worker
+      }
+    });
+
+    // 6. RESPOND INSTANTLY
+    return NextResponse.json({ 
+      taskId: task._id, 
+      status: "queued", 
+      enhancedPrompt: enhancedCinematicPrompt 
+    });
 
   } catch (error: any) {
-    console.error("🔥 Fatal Error in Video Pipeline:", error.message);
+    console.error("🔥 Fatal Error in Video Submission Pipeline:", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

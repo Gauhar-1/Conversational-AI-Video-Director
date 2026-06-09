@@ -56,13 +56,7 @@ async function fetchFromHuggingFace(modelId: string, payload: any, hfKey: string
 
 export async function POST(req: Request) {
   try {
-    // 1. BYOK Authentication (Extracting BOTH Keys)
-    const googleApiKey = req.headers.get("X-Google-API-Key");
-    const hfKey = req.headers.get("X-HF-API-Key");
-    
-    if (!googleApiKey && !hfKey) {
-      return NextResponse.json({ error: "Missing API Keys. Please update settings." }, { status: 401 });
-    }
+  
 
     const body = await req.json();
     const { prompt, projectId, sceneNumber } = body;
@@ -96,35 +90,6 @@ export async function POST(req: Request) {
 
     let finalImageBuffer: Buffer | null = null;
     let lastError = "";
-
-    // --- TIER 1: NANO BANANA (Gemini) ---
-    try {
-      console.log(`🚀 TIER 1: Attempting Nano Banana (Gemini API)...`);
-      finalImageBuffer = await fetchFromNanoBanana(enhancedPrompt, googleApiKey || "");
-      console.log(`✅ Success with Nano Banana!`);
-    } catch (nanoError: any) {
-      console.warn(`⚠️ Nano Banana Failed: ${nanoError.message}. Falling back to Tier 2...`);
-      lastError = nanoError.message;
-
-      // --- TIER 2: HUGGING FACE BYOK LOOP ---
-      const fallbackChain = [
-        { model: "black-forest-labs/FLUX.1-schnell", params: { num_inference_steps: 4, guidance_scale: 7.5 } },
-        { model: "stabilityai/sdxl-turbo", params: { num_inference_steps: 4, guidance_scale: 0.0 } },
-        { model: "runwayml/stable-diffusion-v1-5", params: { num_inference_steps: 25, guidance_scale: 7.5 } }
-      ];
-
-      for (const config of fallbackChain) {
-        try {
-          console.log(`➡️ TIER 2: Attempting HF model: ${config.model}...`);
-          finalImageBuffer = await fetchFromHuggingFace(config.model, { inputs: enhancedPrompt, parameters: config.params }, hfKey || "");
-          console.log(`✅ Success with HF: ${config.model}`);
-          break; 
-        } catch (hfError: any) {
-          console.warn(`⚠️ Failed ${config.model}: ${hfError.message}`);
-          lastError = hfError.message;
-        }
-      }
-    }
 
     // --- TIER 3: THE NUCLEAR FAILSAFE (Pollinations.ai) ---
     if (!finalImageBuffer) {
