@@ -162,29 +162,36 @@ export default function ChatInterface({ activeProjectId, onProjectCreated, onMin
       setStoryboardReady(false); 
 
      // 1. GRAB SETTINGS FROM BROWSER
-      const apiKey = localStorage.getItem("nvidia_api_key");
-      const chatModel = localStorage.getItem("nvidia_chat_model") || "meta/llama-3.1-70b-instruct";
-      
-      if (!apiKey) {
-        throw new Error("MISSING_KEY");
+      const apiKey = localStorage.getItem("groq_api_key");
+      let chatModel = localStorage.getItem("groq_chat_model");
+      if (!chatModel || chatModel.includes("meta/") || chatModel.includes("llama")) {
+        chatModel = "openai/gpt-oss-20b";
+        localStorage.setItem("groq_chat_model", "openai/gpt-oss-20b");
+      }
+
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (apiKey) {
+        headers["Authorization"] = `Bearer ${apiKey}`;
       }
 
       const response = await fetch("/api/chat", {
         method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}` // 2. PASS THE KEY SECURELY
-        },
+        headers,
         body: JSON.stringify({ 
           content: newMsg.content, 
           imageBase64, 
           projectId: activeProjectId,
-          chatModel: chatModel // 3. PASS THE MODEL CHOICE
+          chatModel: chatModel
         }),
       });
 
       if (response.status === 401) throw new Error("INVALID_KEY");
-      if (!response.ok) throw new Error("API Request Failed");
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || "API Request Failed");
+      }
       
       return response.json();
     },
@@ -210,10 +217,12 @@ export default function ChatInterface({ activeProjectId, onProjectCreated, onMin
       if (context?.previousMessages) queryClient.setQueryData(["chatMessages", activeProjectId || "draft"], context.previousMessages);
       
       // 4. HANDLE KEY ERRORS GRACEFULLY
-      if (err.message === "MISSING_KEY") {
-        alert("Please click the Settings gear icon and enter your NVIDIA API Key.");
-      } else if (err.message === "INVALID_KEY") {
-        alert("Your NVIDIA API Key is invalid or expired. Please check your Settings.");
+      if (err.message === "MISSING_KEY" || err.message.includes("Missing Groq API Key")) {
+        alert("Please click the Settings gear icon and enter your Groq API Key.");
+      } else if (err.message === "INVALID_KEY" || err.message.includes("Invalid Groq API Key")) {
+        alert("Your Groq API Key is invalid or expired. Please check your Settings.");
+      } else {
+        alert(err.message || "Failed to communicate with Director AI.");
       }
     },
   });

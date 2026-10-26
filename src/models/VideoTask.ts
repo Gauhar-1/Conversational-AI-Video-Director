@@ -5,6 +5,9 @@ const VideoTaskSchema = new mongoose.Schema({
   projectId: String,
   sceneNumber: Number,
   status: { type: String, enum: ["pending", "processing", "completed", "failed"], default: "pending" },
+  replicatePredictionId: String,
+  originalPrompt: String,
+  enhancedPrompt: String,
   finalVideoUrl: String,
   logs: [{
     providerName: String,

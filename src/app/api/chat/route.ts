@@ -6,22 +6,37 @@ import OpenAI from "openai";
 export async function POST(req: Request) {
   try {
     // ---------------------------------------------------------
-    // 1. BYOK INTERCEPTION & CLIENT SETUP
+    // 1. BYOK INTERCEPTION & CLIENT SETUP (GROQ)
     // ---------------------------------------------------------
     const authHeader = req.headers.get("authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized: Missing API Key" }, { status: 401 });
+    let userApiKey = "";
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      userApiKey = authHeader.split("Bearer ")[1].trim();
     }
-    const userApiKey = authHeader.split("Bearer ")[1];
+    if (!userApiKey) {
+      userApiKey = process.env.GROQ_API_KEY || "";
+    }
 
-    const nvidiaClient = new OpenAI({
+    if (!userApiKey) {
+      return NextResponse.json(
+        { error: "Unauthorized: Missing Groq API Key. Please configure it in Settings." }, 
+        { status: 401 }
+      );
+    }
+
+    const groqClient = new OpenAI({
       apiKey: userApiKey,
-      baseURL: "https://integrate.api.nvidia.com/v1", 
+      baseURL: "https://api.groq.com/openai/v1", 
     });
 
     await dbConnect();
     const { projectId, content, imageBase64, chatModel } = await req.json();
-    const activeChatModel = chatModel || "meta/llama-3.1-70b-instruct";
+
+    // User requested model: openai/gpt-oss-20b for text
+    let activeChatModel = "openai/gpt-oss-20b";
+    if (chatModel && chatModel.trim() !== "" && !chatModel.includes("meta/") && !chatModel.includes("nvidia") && !chatModel.includes("llama-3.1") && !chatModel.includes("llama-3.3")) {
+      activeChatModel = chatModel.trim();
+    }
 
     // ---------------------------------------------------------
     // 2. PROJECT STATE MANAGEMENT
@@ -35,12 +50,12 @@ export async function POST(req: Request) {
     }
 
     // ---------------------------------------------------------
-    // 3. VISION EXTRACTION (If Image is Provided)
+    // 3. VISION EXTRACTION VIA GROQ (If Image is Provided)
     // ---------------------------------------------------------
     if (imageBase64) {
       try {
-        const visionResponse = await nvidiaClient.chat.completions.create({
-          model: "meta/llama-3.2-90b-vision-instruct", 
+        const visionResponse = await groqClient.chat.completions.create({
+          model: "llama-3.2-11b-vision-preview", 
           messages: [
             {
               role: "user",
@@ -100,13 +115,12 @@ export async function POST(req: Request) {
     2. THE "CONTEXT AMNESIA" RULE: The downstream AI models that generate the images and videos have ZERO MEMORY of previous scenes. EVERY single prompt (frame, environment, character, video) must be a massive, highly detailed, self-contained paragraph.
     3. TIMING: Every video generation is exactly 5 seconds long.`;
 
-    if (Object.keys(project.visualMetadata).length > 0) {
+    if (Object.keys(project.visualMetadata || {}).length > 0) {
         systemPrompt += `\n\nGLOBAL VISUAL METADATA: ${JSON.stringify(project.visualMetadata)}. YOU MUST weave these exact lighting, style, and color parameters into EVERY SINGLE prompt you generate.`;
     }
 
     // STATE MACHINE
     if (isStoryboardIntent) {
-      // STEP 6: LINKED KEYFRAME JSON GENERATION (THE NODE COMPOSITOR UPGRADE)
       systemPrompt += `
       \n\nCRITICAL DIRECTIVE: You are outputting a data structure for a Node-Based VFX Compositor. Return ONLY a valid JSON array of scenes. 
       
@@ -148,11 +162,9 @@ export async function POST(req: Request) {
       ]`;
     
     } else if (lastAiMsg.includes("upload an image reference") || lastAiMsg.includes("you decide")) {
-      // STEP 5: VISUAL METADATA ROUTING
       if (imageBase64) {
         systemPrompt += `\n\nCRITICAL DIRECTIVE: You received visual metadata from the user's image. Ask EXACTLY: "Are you ready for me to generate the final Storyboard Canvas?"`;
       } else {
-        // AUTONOMOUS "DIRECTOR OF PHOTOGRAPHY" MODE
         systemPrompt += `\n\nCRITICAL DIRECTIVE: The user did NOT upload an image and wants you to define the visual aesthetic. 
         Act as the Director of Photography. You MUST include a JSON block in your response formatted EXACTLY like this:
         [VISUAL_METADATA_START]
@@ -167,7 +179,6 @@ export async function POST(req: Request) {
       }
 
     } else if (lastAiMsg.includes("satisfactory") || lastAiMsg.includes("adjustments")) {
-      // STEP 4: SCRIPT APPROVAL & IMAGE REQUEST
       if (userMsg.includes("yes") || userMsg.includes("proceed") || userMsg.includes("perfect")) {
           systemPrompt += `\n\nCRITICAL DIRECTIVE: The script is approved. Now, ask EXACTLY: "Please upload an image reference to dictate the color grading, lighting, and cinematic vibe. If you don't have an image, just tell me 'You decide' and I will establish the aesthetic for us."`;
       } else {
@@ -175,27 +186,28 @@ export async function POST(req: Request) {
       }
     
     } else if (lastAiMsg.includes("video length") || lastAiMsg.includes("how long")) {
-      // STEP 3: SCRIPTING THE 5-SECOND TIMELINE
       systemPrompt += `\n\nCRITICAL DIRECTIVE: Break the story into exact 5-second contiguous blocks. Write the continuity script. End by asking EXACTLY: "Is this continuity script satisfactory?"`;
     
     } else {
-      // STEP 1 & 2: CONCEPTUAL BRAINSTORMING
       systemPrompt += `\n\nCRITICAL DIRECTIVE: Discuss the story concept. Flesh out specific character appearances. Once solid, ask EXACTLY: "Is this story finalized? If yes, what should be the total video length?"`;
     }
 
     messages.unshift({ role: "system", content: systemPrompt });
 
     // ---------------------------------------------------------
-    // 6. AI INFERENCE
+    // 6. AI INFERENCE (GROQ - openai/gpt-oss-20b)
     // ---------------------------------------------------------
-    const chatResponse = await nvidiaClient.chat.completions.create({
+    const chatResponse = await groqClient.chat.completions.create({
       model: activeChatModel,
       messages: messages,
-      temperature: isStoryboardIntent ? 0.1 : 0.7, // Low temp for stable JSON formatting
-      max_tokens: 8000, 
-    });
+      temperature: isStoryboardIntent ? 0.1 : 0.7,
+      max_completion_tokens: 8000, 
+    } as any);
 
     let aiMessageText = chatResponse.choices[0]?.message?.content || "I have no response.";
+    
+    // Strip internal thinking tags if emitted by reasoning models
+    aiMessageText = aiMessageText.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
     
     // ---------------------------------------------------------
     // 7. RESPONSE INTERCEPTORS (JSON Parsing & Cleanup)
@@ -260,8 +272,8 @@ export async function POST(req: Request) {
     });
 
   } catch (error: any) {
-    if (error.status === 401 || error.message.includes("401")) {
-      return NextResponse.json({ error: "Invalid NVIDIA API Key. Please update your Settings." }, { status: 401 });
+    if (error.status === 401 || (error.message && error.message.includes("401"))) {
+      return NextResponse.json({ error: "Invalid Groq API Key. Please update your Settings." }, { status: 401 });
     }
     console.error("🔥 Server API Error:", error);
     return NextResponse.json({ error: error.message || "An unexpected error occurred." }, { status: 500 });

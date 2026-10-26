@@ -1,107 +1,131 @@
-// src/app/api/video/generate/route.ts
 import { NextResponse } from "next/server";
 import Replicate from "replicate";
 import dbConnect from "@/lib/db";
 import { VideoTask } from "@/models/VideoTask";
-import { videoQueue } from "@/lib/queue/videoQueue";
+
+// Map user preference to official Replicate model and input payload
+function resolveReplicateConfig(userPreference: string, prompt: string, advancedInputs: any) {
+  const startImage = advancedInputs?.startFrameUrl || advancedInputs?.characterReferenceUrls?.[0];
+  const audioUrl = advancedInputs?.audioUrl;
+
+  const normalized = (userPreference || "").toLowerCase();
+
+  if (normalized.includes("wan")) {
+    return {
+      model: "wan-video/wan-2.5-i2v",
+      input: {
+        prompt,
+        image: startImage,
+        ...(audioUrl ? { audio: audioUrl } : {}),
+        duration: 5,
+        resolution: "720p",
+      },
+    };
+  }
+
+  if (normalized.includes("minimax") || normalized.includes("hailuo")) {
+    return {
+      model: "minimax/video-01",
+      input: {
+        prompt,
+        ...(startImage ? { first_frame_image: startImage } : {}),
+      },
+    };
+  }
+
+  if (normalized.includes("luma")) {
+    return {
+      model: "luma/ray",
+      input: {
+        prompt,
+        ...(startImage ? { start_image: startImage } : {}),
+      },
+    };
+  }
+
+  // Default high-performance cinematic model: Kling 2.5 Turbo Pro
+  return {
+    model: "kwaivgi/kling-v2.5-turbo-pro",
+    input: {
+      prompt,
+      ...(startImage ? { start_image: startImage } : {}),
+      ...(advancedInputs?.endFrameUrl ? { end_image: advancedInputs.endFrameUrl } : {}),
+      duration: 5,
+      aspect_ratio: "16:9",
+    },
+  };
+}
 
 export async function POST(req: Request) {
   try {
     await dbConnect();
-    
-    // 1. Extract raw inputs and the Replicate API Key
+
     const { 
       rawPrompt, 
       projectId, 
       sceneNumber, 
       advancedInputs, 
-      userPreference  
+      userPreference 
     } = await req.json();
 
-    const replicateApiKey = req.headers.get("X-Replicate-Key");
-
-    if (!advancedInputs?.startFrameUrl && !advancedInputs?.characterReferenceUrls) {
-      return NextResponse.json({ error: "At least one visual reference is required." }, { status: 400 });
-    }
+    const replicateApiKey = req.headers.get("X-Replicate-Key") || process.env.REPLICATE_API_KEY || process.env.REPLICATE_API_TOKEN;
 
     if (!replicateApiKey) {
-      return NextResponse.json({ error: "Replicate API key is required." }, { status: 401 });
+      return NextResponse.json(
+        { error: "Replicate API Key is required. Please add it in Settings." }, 
+        { status: 401 }
+      );
     }
 
-    // 2. Initialize Replicate specifically for the Agentic Rewriter
+    if (!rawPrompt) {
+      return NextResponse.json({ error: "Scene prompt is required." }, { status: 400 });
+    }
+
     const replicate = new Replicate({ auth: replicateApiKey });
 
-    // 3. THE AGENTIC REWRITER (Powered by Llama 3 on Replicate)
-    // 3. THE AGENTIC REWRITER (Powered by Llama 3 on Replicate)
-    let enhancedCinematicPrompt = rawPrompt;
+    // Cinematic prompt enrichment
+    const enhancedCinematicPrompt = `${rawPrompt.trim()} - Cinematic masterpiece, 8k resolution, photorealistic, dynamic camera movement, cinematic lighting, 35mm film grain.`;
 
-    try {
-      console.log(`✍️ [Scene ${sceneNumber}] Enhancing prompt via Replicate (Llama 3)...`);
-      
-      const systemPrompt = `You are the Master Cinematographer for Director AI, an elite video generation engine.
-Take the user's basic scene idea and elevate it into a vivid, award-winning cinematic blueprint.
-Structure output as a single descriptive paragraph.
-Define Subject & Action, Camera Geometry, Lighting, and Lens & Depth.
-Do NOT use narrative prose (e.g., "he feels sad"). Describe the physical manifestation.
-Always append this exact text at the end: "Cinematic masterpiece, award-winning direction, production-grade, 8k resolution, photorealistic, hyper-detailed textures."`;
+    // Resolve Replicate model & parameters
+    const { model, input } = resolveReplicateConfig(userPreference, enhancedCinematicPrompt, advancedInputs);
 
-      const output = await replicate.run(
-        "meta/meta-llama-3-70b-instruct",
-        {
-          input: {
-            prompt: rawPrompt,
-            system_prompt: systemPrompt,
-            max_tokens: 512,
-            temperature: 0.7,
-          }
-        }
-      );
+    console.log(`🎬 Submitting Replicate prediction for Scene ${sceneNumber} using model ${model}...`);
 
-      if (Array.isArray(output)) {
-        enhancedCinematicPrompt = output.join("").trim();
-        console.log(`✅ [Scene ${sceneNumber}] Enhanced Prompt generated.`);
-      }
+    // Create asynchronous prediction directly on Replicate
+    const prediction = await replicate.predictions.create({
+      model: model as `${string}/${string}`,
+      input,
+    });
 
-    } catch (llmError) {
-      console.warn("⚠️ Text Enhancement failed. Falling back to Director's Coverage Template.");
-      
-      // GRACEFUL DEGRADATION: The Hardcoded Director's Fail-Safe
-      // This forces the video model to generate editing coverage based on whatever location/characters are in the raw prompt.
-      enhancedCinematicPrompt = `A continuous, multi-angle cinematic coverage sequence of the following scene: "${rawPrompt}". 
-The camera acts as a master cinematographer gathering coverage for post-production editing. It dynamically shifts perspectives, starting with a wide establishing shot of the location to show the environment, then smoothly transitioning into over-the-shoulder (OTS) tracking shots of the characters having a conversation, and finally moving into tight, emotive close-ups of their facial expressions. 
-Cinematic masterpiece, award-winning direction, production-grade, 8k resolution, photorealistic, dramatic lighting, hyper-detailed textures.`;
-    }
-
-    // 4. DATABASE: Create the tracking document
+    // Create VideoTask document in MongoDB for UI status tracking & polling
     const task = await VideoTask.create({
       projectId,
       sceneNumber,
-      status: "pending",
+      status: "processing",
+      replicatePredictionId: prediction.id,
       originalPrompt: rawPrompt,
       enhancedPrompt: enhancedCinematicPrompt,
-      logs: [] 
+      logs: [
+        {
+          providerName: model,
+          attemptNumber: 1,
+          timestamp: new Date(),
+        },
+      ],
     });
 
-    // 5. QUEUE: Push the heavy generation job to the background worker
-    await videoQueue.add("generate-video", {
+    return NextResponse.json({
       taskId: task._id,
-      prompt: enhancedCinematicPrompt,
-      advancedInputs,
-      userPreference,
-      keys: {
-        replicate: replicateApiKey // Pass the key to the background worker
-      }
-    });
-
-    // 6. RESPOND INSTANTLY
-    return NextResponse.json({ 
-      taskId: task._id, 
-      status: "queued", 
-      enhancedPrompt: enhancedCinematicPrompt 
+      status: "queued",
+      predictionId: prediction.id,
+      enhancedPrompt: enhancedCinematicPrompt,
     });
 
   } catch (error: any) {
-    console.error("🔥 Fatal Error in Video Submission Pipeline:", error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("🔥 Error submitting video to Replicate:", error);
+    return NextResponse.json(
+      { error: error.message || "Failed to initiate video generation." }, 
+      { status: 500 }
+    );
   }
 }

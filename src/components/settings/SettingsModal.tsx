@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Key, Save, Check, Layers } from "lucide-react";
+import { X, Key, Save, Check, Layers, Cpu } from "lucide-react";
 
 type SettingsModalProps = {
   isOpen: boolean;
@@ -10,18 +10,21 @@ type SettingsModalProps = {
 
 export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   // --- STATES FOR BYOK (Bring Your Own Key) ---
+  const [groqKey, setGroqKey] = useState("");
   const [replicateKey, setReplicateKey] = useState("");
   const [isSaved, setIsSaved] = useState(false);
 
   // Load saved settings when the modal opens
   useEffect(() => {
     if (isOpen) {
+      setGroqKey(localStorage.getItem("groq_api_key") || "");
       setReplicateKey(localStorage.getItem("replicate_api_key") || "");
       setIsSaved(false);
     }
   }, [isOpen]);
 
   const handleSave = () => {
+    localStorage.setItem("groq_api_key", groqKey.trim());
     localStorage.setItem("replicate_api_key", replicateKey.trim());
     
     setIsSaved(true);
@@ -59,18 +62,42 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         </div>
 
         {/* --- BODY --- */}
-        <div className="p-6 space-y-6 overflow-y-auto custom-scrollbar">
+        <div className="p-6 space-y-6 overflow-y-auto max-h-[75vh] custom-scrollbar">
           
-          {/* SECTION 1: REPLICATE (Unified Engine) */}
+          {/* SECTION 1: GROQ (Director Brain & Chat Model) */}
+          <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-5 space-y-4 hover:border-amber-500/30 transition-colors relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none"><Cpu className="w-32 h-32" /></div>
+            
+            <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2 border-b border-zinc-800/80 pb-3 relative z-10">
+              <Cpu className="w-4 h-4 text-amber-400" /> 
+              Director AI Brain (Groq - openai/gpt-oss-20b)
+            </h3>
+            <p className="text-[11px] text-amber-400/80 font-medium pb-1 relative z-10">
+              Powered by OpenAI's open-weight reasoning model (`openai/gpt-oss-20b`) on Groq for sub-second screenplay directing, script continuity, and JSON storyboard synthesis.
+            </p>
+
+            <div className="space-y-2 relative z-10">
+              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Groq API Key</label>
+              <input 
+                type="password" 
+                value={groqKey} 
+                onChange={(e) => setGroqKey(e.target.value)} 
+                placeholder="gsk_..."
+                className="w-full bg-[#0a0a0c] border border-zinc-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all font-mono shadow-inner"
+              />
+            </div>
+          </div>
+
+          {/* SECTION 2: REPLICATE (Unified Media Engine) */}
           <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-5 space-y-4 hover:border-indigo-500/30 transition-colors relative overflow-hidden">
             <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none"><Layers className="w-32 h-32" /></div>
             
             <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2 border-b border-zinc-800/80 pb-3 relative z-10">
               <Layers className="w-4 h-4 text-indigo-400" /> 
-              Unified Studio Engine (Replicate)
+              Visual & Video Engine (Replicate)
             </h3>
             <p className="text-[11px] text-indigo-400/80 font-medium pb-1 relative z-10">
-              Powers the Agentic Rewriter (Llama 3), Image Composition, and all Video Generation models.
+              Powers FLUX background & character generation, start frames, and high-fidelity video rendering models (Kling, Wan, MiniMax).
             </p>
 
             <div className="space-y-2 relative z-10">
@@ -103,7 +130,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             }`}
           >
             {isSaved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-            {isSaved ? "Token Secured" : "Save Pipeline State"}
+            {isSaved ? "Keys Secured" : "Save Pipeline State"}
           </button>
         </div>
 

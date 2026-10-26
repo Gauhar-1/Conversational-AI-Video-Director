@@ -52,7 +52,10 @@ export const VideoNode = memo(({ data }: NodeProps) => {
     queryKey: ['video-status', scene?.video_task_id],
     queryFn: async () => {
       if (!scene?.video_task_id) return null;
-      const res = await fetch(`/api/generate-video/status/${scene.video_task_id}`);
+      const repKey = typeof window !== "undefined" ? localStorage.getItem("replicate_api_key") : null;
+      const res = await fetch(`/api/generate-video/status/${scene.video_task_id}`, {
+        headers: repKey ? { "X-Replicate-Key": repKey } : {},
+      });
       if (!res.ok) throw new Error("Failed to fetch status");
       return res.json();
     },

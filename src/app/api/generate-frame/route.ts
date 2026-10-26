@@ -1,62 +1,25 @@
 import { NextResponse } from "next/server";
 import { v2 as cloudinary } from "cloudinary";
+import Replicate from "replicate";
 import dbConnect from "@/lib/db";
 import { Project } from "@/models/Project";
 
-// Configure Cloudinary (Server-side only)
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// --- HELPER: TIER 1 (NANO BANANA 2 / GEMINI 3.1 FLASH IMAGE) ---
-async function fetchFromNanoBanana(prompt: string, googleApiKey: string): Promise<Buffer> {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=${googleApiKey}`;
-  
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }]
-    })
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || `Nano Banana HTTP ${response.status}`);
-  }
-
-  const data = await response.json();
-  const base64Data = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-  if (!base64Data) throw new Error("Nano Banana returned an empty image response.");
-  
-  return Buffer.from(base64Data, "base64");
-}
-
-// --- HELPER: TIER 2 (HUGGING FACE) ---
-async function fetchFromHuggingFace(modelId: string, payload: any, hfKey: string): Promise<Buffer> {
-  const response = await fetch(`https://api-inference.huggingface.co/models/${modelId}`, {
-    method: "POST",
-    headers: { 
-      "Authorization": `Bearer ${hfKey}`, 
-      "Content-Type": "application/json" 
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || `HTTP ${response.status} from ${modelId}`);
-  }
-  
-  const arrayBuffer = await response.arrayBuffer();
-  return Buffer.from(arrayBuffer);
-}
-
 export async function POST(req: Request) {
   try {
-  
+    const replicateApiKey = req.headers.get("X-Replicate-Key") || process.env.REPLICATE_API_KEY || process.env.REPLICATE_API_TOKEN;
+
+    if (!replicateApiKey) {
+      return NextResponse.json(
+        { error: "Replicate API Key is required. Please configure it in Settings." }, 
+        { status: 401 }
+      );
+    }
 
     const body = await req.json();
     const { prompt, projectId, sceneNumber } = body;
@@ -67,7 +30,6 @@ export async function POST(req: Request) {
 
     await dbConnect();
 
-    // 2. FETCH GLOBAL CONTEXT & ENHANCE PROMPT
     const project = await Project.findById(projectId);
     if (!project) {
       return NextResponse.json({ error: "Project not found in database." }, { status: 404 });
@@ -83,80 +45,85 @@ export async function POST(req: Request) {
       Style: ${globalStyle}. 
       Lighting: ${globalLighting}. 
       ${globalColors}. 
-      Shot on ARRI Alexa 65, 35mm lens, 8k resolution, photorealistic, film grain, cinematic depth of field.
+      Shot on ARRI Alexa 65, 35mm lens, 8k resolution, photorealistic, film grain, cinematic depth of field, wide screen composition.
     `.replace(/\s+/g, " ").trim();
 
-    console.log(`🎬 Generating Frame for Scene ${sceneNumber}...`);
+    console.log(`🎬 Generating Keyframe for Scene ${sceneNumber} via Replicate (FLUX)...`);
 
-    let finalImageBuffer: Buffer | null = null;
-    let lastError = "";
+    const replicate = new Replicate({ auth: replicateApiKey });
 
-    // --- TIER 3: THE NUCLEAR FAILSAFE (Pollinations.ai) ---
-    if (!finalImageBuffer) {
-      console.log(`🚨 Tiers 1 & 2 Overloaded. Triggering Pollinations Failsafe...`);
-      try {
-        const safePrompt = encodeURIComponent(enhancedPrompt);
-        const seed = Math.floor(Math.random() * 1000000); 
-        
-        // Use landscape 16:9 ratio for frames (1280x720) instead of square
-        const pollinationsUrl = `https://image.pollinations.ai/prompt/${safePrompt}?width=1280&height=720&nologo=true&seed=${seed}&model=flux`;
-
-        const pollResponse = await fetch(pollinationsUrl);
-        if (!pollResponse.ok) throw new Error(`Pollinations HTTP ${pollResponse.status}`);
-        
-        const arrayBuffer = await pollResponse.arrayBuffer();
-        finalImageBuffer = Buffer.from(arrayBuffer);
-        console.log(`✅ Success with Pollinations FLUX Failsafe!`);
-      } catch (pollError: any) {
-         throw new Error(`Total generator failure. Last Error: ${lastError}. Failsafe Error: ${pollError.message}`);
-      }
-    }
-    // -------------------------------------------------------
-
-    // 4. CLOUDINARY UPLOAD PIPELINE
-    const cloudinaryUrl = await new Promise<string>((resolve, reject) => {
-      const uploadStream = cloudinary.uploader.upload_stream(
-        { 
-          folder: `director_ai/${projectId}/frames`,
-          public_id: `scene_${sceneNumber}_frame`,
-          overwrite: true
-        }, 
-        (error, result) => {
-          if (error) {
-            console.error("Cloudinary Upload Error:", error);
-            reject(new Error("Failed to save image to cloud storage."));
-          } else {
-            resolve(result!.secure_url);
-          }
-        }
-      );
-      uploadStream.end(finalImageBuffer);
+    const output: any = await replicate.run("black-forest-labs/flux-schnell", {
+      input: {
+        prompt: enhancedPrompt,
+        aspect_ratio: "16:9",
+        output_format: "webp",
+        num_outputs: 1,
+      },
     });
 
-    // 5. DATABASE SYNCHRONIZATION
+    let directUrl = "";
+    if (Array.isArray(output) && output.length > 0) {
+      directUrl = typeof output[0] === "string" ? output[0] : (output[0]?.url ? output[0].url() : String(output[0]));
+    } else if (typeof output === "string") {
+      directUrl = output;
+    }
+
+    if (!directUrl) {
+      throw new Error("Replicate returned an empty frame image output.");
+    }
+
+    let finalImageUrl = directUrl;
+
+    // Optional Cloudinary Upload for permanent CDN caching
+    try {
+      const imgRes = await fetch(directUrl);
+      if (imgRes.ok) {
+        const imageBuffer = Buffer.from(await imgRes.arrayBuffer());
+        finalImageUrl = await new Promise<string>((resolve) => {
+          const uploadStream = cloudinary.uploader.upload_stream(
+            { 
+              folder: `director_ai/${projectId}/frames`,
+              public_id: `scene_${sceneNumber}_frame`,
+              overwrite: true
+            }, 
+            (error, result) => {
+              if (error || !result?.secure_url) {
+                console.warn("Cloudinary upload failed, using Replicate URL:", error?.message);
+                resolve(directUrl);
+              } else {
+                resolve(result.secure_url);
+              }
+            }
+          );
+          uploadStream.end(imageBuffer);
+        });
+      }
+    } catch (cdnErr: any) {
+      console.warn("CDN sync skipped:", cdnErr.message);
+    }
+
+    // Database Synchronization
     const updatedProject = await Project.findOneAndUpdate(
       { _id: projectId, "storyboard.scene_number": sceneNumber },
       { 
         $set: { 
-          "storyboard.$.frame_url": cloudinaryUrl,
+          "storyboard.$.frame_url": finalImageUrl,
         } 
       }, 
-      // CRITICAL FIX: Replaced `new: true` with `returnDocument: 'after'`
       { returnDocument: 'after' } 
     );
 
     if (!updatedProject) {
-      console.error(`🚨 Failed to update DB for project ${projectId}, scene ${sceneNumber}`);
-      return NextResponse.json({ error: "Image generated, but failed to save to database." }, { status: 500 });
+      return NextResponse.json({ error: "Frame generated, but failed to save to database." }, { status: 500 });
     }
 
     return NextResponse.json({ 
       status: "success",
-      imageUrl: cloudinaryUrl 
+      imageUrl: finalImageUrl 
     });
 
   } catch (error: any) {
-    console.error("🔥 Fatal Server Error in Generate Frame:", error);
+    console.error("🔥 Error in Generate Frame:", error);
     return NextResponse.json({ 
       error: error.message || "An unexpected internal server error occurred." 
     }, { status: 500 });

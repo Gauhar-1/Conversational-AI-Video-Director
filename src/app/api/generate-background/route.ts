@@ -1,67 +1,24 @@
 import { NextResponse } from "next/server";
 import { v2 as cloudinary } from "cloudinary";
+import Replicate from "replicate";
 import dbConnect from "@/lib/db";
 import { Project } from "@/models/Project";
 
-// Configure Cloudinary (Server-side only)
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// --- HELPER: TIER 1 (NANO BANANA 2 / GEMINI 3.1 FLASH IMAGE) ---
-async function fetchFromNanoBanana(prompt: string, googleApiKey: string): Promise<Buffer> {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=${googleApiKey}`;
-  
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }]
-    })
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || `Nano Banana HTTP ${response.status}`);
-  }
-
-  const data = await response.json();
-  const base64Data = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-  if (!base64Data) throw new Error("Nano Banana returned an empty image response.");
-  
-  return Buffer.from(base64Data, "base64");
-}
-
-// --- HELPER: TIER 2 (HUGGING FACE) ---
-async function fetchFromHuggingFace(modelId: string, payload: any, hfKey: string): Promise<Buffer> {
-  const response = await fetch(`https://api-inference.huggingface.co/models/${modelId}`, {
-    method: "POST",
-    headers: { 
-      "Authorization": `Bearer ${hfKey}`, 
-      "Content-Type": "application/json" 
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || `HTTP ${response.status} from ${modelId}`);
-  }
-  
-  const arrayBuffer = await response.arrayBuffer();
-  return Buffer.from(arrayBuffer);
-}
-
 export async function POST(req: Request) {
   try {
-    // 1. BYOK Authentication
-    const googleApiKey = req.headers.get("X-Google-API-Key");
-    const hfKey = req.headers.get("X-HF-API-Key");
-    
-    if (!googleApiKey && !hfKey) {
-      return NextResponse.json({ error: "Missing API Keys. Please update settings." }, { status: 401 });
+    const replicateApiKey = req.headers.get("X-Replicate-Key") || process.env.REPLICATE_API_KEY || process.env.REPLICATE_API_TOKEN;
+
+    if (!replicateApiKey) {
+      return NextResponse.json(
+        { error: "Replicate API Key is required. Please configure it in Settings." }, 
+        { status: 401 }
+      );
     }
 
     const body = await req.json();
@@ -73,7 +30,6 @@ export async function POST(req: Request) {
 
     await dbConnect();
 
-    // 2. FETCH GLOBAL CONTEXT & ENHANCE PROMPT FOR ENVIRONMENTS
     const project = await Project.findById(projectId);
     if (!project) {
       return NextResponse.json({ error: "Project not found in database." }, { status: 404 });
@@ -84,7 +40,6 @@ export async function POST(req: Request) {
     const globalLighting = visualMeta.lighting || "dramatic studio lighting";
     const globalColors = visualMeta.colors ? `Color grading: ${visualMeta.colors}` : "";
 
-    // CRITICAL TWEAK: Instructing the model to avoid characters and focus on establishing the scene
     const enhancedPrompt = `
       Empty environment design, establishing wide shot. 
       LOCATION: ${prompt}. 
@@ -94,108 +49,84 @@ export async function POST(req: Request) {
       No characters, no people, highly detailed landscape, architectural digest, cinematic matte painting, 8k resolution.
     `.replace(/\s+/g, " ").trim();
 
-    console.log(`🏞️ Generating Background for Scene ${sceneNumber}...`);
+    console.log(`🏞️ Generating Background for Scene ${sceneNumber} via Replicate (FLUX)...`);
 
-    let finalImageBuffer: Buffer | null = null;
-    let lastError = "";
+    const replicate = new Replicate({ auth: replicateApiKey });
 
-    // --- TIER 1: NANO BANANA (Gemini) ---
-    try {
-      console.log(`🚀 TIER 1: Attempting Nano Banana (Gemini API)...`);
-      finalImageBuffer = await fetchFromNanoBanana(enhancedPrompt, googleApiKey || "");
-      console.log(`✅ Success with Nano Banana!`);
-    } catch (nanoError: any) {
-      console.warn(`⚠️ Nano Banana Failed: ${nanoError.message}. Falling back to Tier 2...`);
-      lastError = nanoError.message;
-
-      // --- TIER 2: HUGGING FACE BYOK LOOP ---
-      // Note: SDXL is actually better at environments than FLUX, so we prioritize it here.
-      const fallbackChain = [
-        { model: "stabilityai/sdxl-turbo", params: { num_inference_steps: 4, guidance_scale: 0.0 } },
-        { model: "black-forest-labs/FLUX.1-schnell", params: { num_inference_steps: 4, guidance_scale: 7.5 } },
-        { model: "runwayml/stable-diffusion-v1-5", params: { num_inference_steps: 25, guidance_scale: 7.5 } }
-      ];
-
-      for (const config of fallbackChain) {
-        try {
-          console.log(`➡️ TIER 2: Attempting HF model: ${config.model}...`);
-          finalImageBuffer = await fetchFromHuggingFace(config.model, { inputs: enhancedPrompt, parameters: config.params }, hfKey || "");
-          console.log(`✅ Success with HF: ${config.model}`);
-          break; 
-        } catch (hfError: any) {
-          console.warn(`⚠️ Failed ${config.model}: ${hfError.message}`);
-          lastError = hfError.message;
-        }
-      }
-    }
-
-    // --- TIER 3: THE NUCLEAR FAILSAFE (Pollinations.ai) ---
-    if (!finalImageBuffer) {
-      console.log(`🚨 Tiers 1 & 2 Overloaded. Triggering Pollinations Failsafe...`);
-      try {
-        const safePrompt = encodeURIComponent(enhancedPrompt);
-        const seed = Math.floor(Math.random() * 1000000); 
-        
-        // Backgrounds look best in 16:9 cinematic ratio
-        const pollinationsUrl = `https://image.pollinations.ai/prompt/${safePrompt}?width=1280&height=720&nologo=true&seed=${seed}&model=flux`;
-
-        const pollResponse = await fetch(pollinationsUrl);
-        if (!pollResponse.ok) throw new Error(`Pollinations HTTP ${pollResponse.status}`);
-        
-        const arrayBuffer = await pollResponse.arrayBuffer();
-        finalImageBuffer = Buffer.from(arrayBuffer);
-        console.log(`✅ Success with Pollinations FLUX Failsafe!`);
-      } catch (pollError: any) {
-         throw new Error(`Total generator failure. Last Error: ${lastError}. Failsafe Error: ${pollError.message}`);
-      }
-    }
-    // -------------------------------------------------------
-
-    // 4. CLOUDINARY UPLOAD PIPELINE
-    const cloudinaryUrl = await new Promise<string>((resolve, reject) => {
-      const uploadStream = cloudinary.uploader.upload_stream(
-        { 
-          folder: `director_ai/${projectId}/backgrounds`,
-          public_id: `scene_${sceneNumber}_bg`,
-          overwrite: true
-        }, 
-        (error, result) => {
-          if (error) {
-            console.error("Cloudinary Upload Error:", error);
-            reject(new Error("Failed to save image to cloud storage."));
-          } else {
-            resolve(result!.secure_url);
-          }
-        }
-      );
-      uploadStream.end(finalImageBuffer);
+    const output: any = await replicate.run("black-forest-labs/flux-schnell", {
+      input: {
+        prompt: enhancedPrompt,
+        aspect_ratio: "16:9",
+        output_format: "webp",
+        num_outputs: 1,
+      },
     });
 
-    // 5. DATABASE SYNCHRONIZATION
+    let directUrl = "";
+    if (Array.isArray(output) && output.length > 0) {
+      directUrl = typeof output[0] === "string" ? output[0] : (output[0]?.url ? output[0].url() : String(output[0]));
+    } else if (typeof output === "string") {
+      directUrl = output;
+    }
+
+    if (!directUrl) {
+      throw new Error("Replicate returned an empty image output.");
+    }
+
+    let finalImageUrl = directUrl;
+
+    // Optional Cloudinary Upload for permanent CDN caching
+    try {
+      const imgRes = await fetch(directUrl);
+      if (imgRes.ok) {
+        const imageBuffer = Buffer.from(await imgRes.arrayBuffer());
+        finalImageUrl = await new Promise<string>((resolve) => {
+          const uploadStream = cloudinary.uploader.upload_stream(
+            { 
+              folder: `director_ai/${projectId}/backgrounds`,
+              public_id: `scene_${sceneNumber}_bg`,
+              overwrite: true
+            }, 
+            (error, result) => {
+              if (error || !result?.secure_url) {
+                console.warn("Cloudinary upload failed, using Replicate URL:", error?.message);
+                resolve(directUrl);
+              } else {
+                resolve(result.secure_url);
+              }
+            }
+          );
+          uploadStream.end(imageBuffer);
+        });
+      }
+    } catch (cdnErr: any) {
+      console.warn("CDN sync skipped:", cdnErr.message);
+    }
+
+    // Database Synchronization
     const updatedProject = await Project.findOneAndUpdate(
       { _id: projectId, "storyboard.scene_number": sceneNumber },
       { 
         $set: { 
-          "storyboard.$.background_url": cloudinaryUrl,
+          "storyboard.$.background_url": finalImageUrl,
         } 
       }, 
       { returnDocument: 'after' } 
     );
 
     if (!updatedProject) {
-      console.error(`🚨 Failed to update DB for project ${projectId}, scene ${sceneNumber}`);
       return NextResponse.json({ error: "Image generated, but failed to save to database." }, { status: 500 });
     }
 
     return NextResponse.json({ 
       status: "success",
-      imageUrl: cloudinaryUrl 
+      imageUrl: finalImageUrl 
     });
 
   } catch (error: any) {
-    console.error("🔥 Fatal Server Error in Generate Background:", error);
+    console.error("🔥 Error in Generate Background:", error);
     return NextResponse.json({ 
-      error: error.message || "An unexpected internal server error occurred." 
+      error: error.message || "An unexpected error occurred during background generation." 
     }, { status: 500 });
   }
 }

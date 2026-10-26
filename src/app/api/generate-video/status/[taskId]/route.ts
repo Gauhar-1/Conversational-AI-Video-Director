@@ -1,48 +1,116 @@
-// src/app/api/video/status/[taskId]/route.ts
+// src/app/api/generate-video/status/[taskId]/route.ts
 import { NextResponse } from "next/server";
+import Replicate from "replicate";
 import dbConnect from "@/lib/db";
 import { VideoTask } from "@/models/VideoTask";
 import { Project } from "@/models/Project";
 
-// Notice the type definition matches your Next.js dynamic routing fix
-export async function GET(req: Request, { params }: { params: Promise<{ taskId: string }> }) {
+export async function GET(
+  req: Request, 
+  { params }: { params: Promise<{ taskId: string }> }
+) {
   try {
     await dbConnect();
     
-    // Await the params to extract the ID securely
-    const resolvedParams = await params;
-    const taskId = resolvedParams.taskId;
+    const { taskId } = await params;
 
     if (!taskId) {
       return NextResponse.json({ error: "taskId parameter is required" }, { status: 400 });
     }
 
-    // 1. Query OUR database, not the external AI provider
     const task = await VideoTask.findById(taskId);
 
     if (!task) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
 
-    // 2. If the background worker finished the job, sync it to the main Project
-    // (This ensures the video permanently lives in the user's storyboard)
+    // 1. If already completed, return immediately
     if (task.status === "completed" && task.finalVideoUrl) {
-       await Project.findOneAndUpdate(
-         { _id: task.projectId, "storyboard.scene_number": task.sceneNumber },
-         { $set: { "storyboard.$.video_url": task.finalVideoUrl } }
-       );
+      return NextResponse.json({
+        status: "completed",
+        finalVideoUrl: task.finalVideoUrl,
+        logs: task.logs,
+        enhancedPrompt: task.enhancedPrompt,
+      });
     }
 
-    // 3. Return the unified state to the frontend
+    // 2. If already failed, return immediately
+    if (task.status === "failed") {
+      return NextResponse.json({
+        status: "failed",
+        logs: task.logs,
+        enhancedPrompt: task.enhancedPrompt,
+      });
+    }
+
+    // 3. If in flight and has a Replicate Prediction ID, check Replicate API
+    const replicateApiKey = req.headers.get("X-Replicate-Key") || process.env.REPLICATE_API_KEY || process.env.REPLICATE_API_TOKEN;
+
+    if (task.replicatePredictionId && replicateApiKey) {
+      const replicate = new Replicate({ auth: replicateApiKey });
+      const prediction = await replicate.predictions.get(task.replicatePredictionId);
+
+      if (prediction.status === "succeeded") {
+        const output = prediction.output;
+        let finalUrl = "";
+
+        if (Array.isArray(output) && output.length > 0) {
+          finalUrl = String(output[0]);
+        } else if (typeof output === "string") {
+          finalUrl = output;
+        } else if (output && typeof output === "object") {
+          finalUrl = (output as any).video || (output as any).url || String(output);
+        }
+
+        task.status = "completed";
+        task.finalVideoUrl = finalUrl;
+        await task.save();
+
+        // Sync video URL to the Project storyboard in MongoDB
+        if (task.projectId && task.sceneNumber !== undefined) {
+          await Project.findOneAndUpdate(
+            { _id: task.projectId, "storyboard.scene_number": task.sceneNumber },
+            { $set: { "storyboard.$.video_url": finalUrl } }
+          );
+        }
+
+        return NextResponse.json({
+          status: "completed",
+          finalVideoUrl: finalUrl,
+          logs: task.logs,
+          enhancedPrompt: task.enhancedPrompt,
+        });
+      }
+
+      if (prediction.status === "failed" || prediction.status === "canceled") {
+        task.status = "failed";
+        task.logs.push({
+          providerName: "Replicate",
+          attemptNumber: 1,
+          errorReason: prediction.error ? String(prediction.error) : "Prediction failed on Replicate",
+          timestamp: new Date(),
+        });
+        await task.save();
+
+        return NextResponse.json({
+          status: "failed",
+          logs: task.logs,
+          enhancedPrompt: task.enhancedPrompt,
+          error: prediction.error,
+        });
+      }
+    }
+
+    // 4. Still processing on Replicate
     return NextResponse.json({
-      status: task.status, // "pending", "processing", "completed", or "failed"
+      status: task.status || "processing",
       finalVideoUrl: task.finalVideoUrl,
-      logs: task.logs, // Sends the exact failure reasons (if any) to the UI
-      enhancedPrompt: task.enhancedPrompt // The cinematic prompt we generated
+      logs: task.logs,
+      enhancedPrompt: task.enhancedPrompt,
     });
 
   } catch (error: any) {
-    console.error("🔥 Status Check Error:", error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("🔥 Status Check Error:", error);
+    return NextResponse.json({ error: error.message || "Failed to check video status" }, { status: 500 });
   }
 }

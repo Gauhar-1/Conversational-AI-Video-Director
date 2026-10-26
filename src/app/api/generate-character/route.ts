@@ -1,68 +1,24 @@
 import { NextResponse } from "next/server";
-import { Project } from "@/models/Project";
-import { uploadBufferToCloudinary } from "@/lib/cloudinary";
+import { v2 as cloudinary } from "cloudinary";
+import Replicate from "replicate";
 import dbConnect from "@/lib/db";
+import { Project } from "@/models/Project";
 
-// --- HELPER: TIER 1 (NANO BANANA 2 / GEMINI 3.1 FLASH IMAGE) ---
-async function fetchFromNanoBanana(prompt: string, googleApiKey: string): Promise<Buffer> {
-  // Upgraded to the new Gemini 3.1 Flash Image unified endpoint
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=${googleApiKey}`;
-  
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{
-        role: "user",
-        parts: [{ text: prompt }]
-      }]
-    })
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || `Nano Banana HTTP ${response.status}`);
-  }
-
-  const data = await response.json();
-  
-  // Extract the base64 image from the new generateContent response structure
-  const base64Data = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-  
-  if (!base64Data) throw new Error("Nano Banana 2 returned an empty or invalid image response.");
-  
-  return Buffer.from(base64Data, "base64");
-}
-
-// --- HELPER: TIER 2 (HUGGING FACE) ---
-async function fetchFromHuggingFace(modelId: string, payload: any, hfKey: string): Promise<Buffer> {
-  const response = await fetch(`https://api-inference.huggingface.co/models/${modelId}`, {
-    method: "POST",
-    headers: { 
-      "Authorization": `Bearer ${hfKey}`, 
-      "Content-Type": "application/json" 
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || `HTTP ${response.status} from ${modelId}`);
-  }
-  
-  const arrayBuffer = await response.arrayBuffer();
-  return Buffer.from(arrayBuffer);
-}
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 export async function POST(req: Request) {
   try {
-    await dbConnect();
+    const replicateApiKey = req.headers.get("X-Replicate-Key") || process.env.REPLICATE_API_KEY || process.env.REPLICATE_API_TOKEN;
 
-    const googleApiKey = req.headers.get("X-Google-API-Key");
-    const hfKey = req.headers.get("X-HF-API-Key");
-    
-    if (!googleApiKey && !hfKey) {
-      return NextResponse.json({ error: "Missing API Keys. Please update settings." }, { status: 401 });
+    if (!replicateApiKey) {
+      return NextResponse.json(
+        { error: "Replicate API Key is required. Please configure it in Settings." }, 
+        { status: 401 }
+      );
     }
 
     const { prompt, charId, projectId, sceneNumber } = await req.json();
@@ -71,96 +27,84 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing required fields." }, { status: 400 });
     }
 
+    await dbConnect();
+
     const enhancedPrompt = `
-      Professional real character model sheet, contrast background to appearance. 
-      Multiple views of the same character: Front, side profile, and back view. 
-      Bottom row showing various facial expressions (neutral, happy, angry, sad). 
+      Professional character concept sheet, studio portrait, neutral background. 
+      Multiple angles of the same character: front view and 3/4 profile. 
       SUBJECT: ${prompt}. 
-      High detail, sharp lines, cinematic lighting, masterpiece.
+      High detail, sharp facial features, cinematic character lighting, photorealistic, 8k resolution.
     `.replace(/\s+/g, " ").trim();
 
-    console.log(`👤 Generating Appearance Board for Character ${charId}...`);
+    console.log(`👤 Generating Character Sheet for ${charId} via Replicate (FLUX)...`);
 
-    let finalImageBuffer: Buffer | null = null;
-    let lastError = "";
+    const replicate = new Replicate({ auth: replicateApiKey });
 
-    // --- TIER 1: NANO BANANA (Gemini 3 Flash Image) ---
+    const output: any = await replicate.run("black-forest-labs/flux-schnell", {
+      input: {
+        prompt: enhancedPrompt,
+        aspect_ratio: "1:1",
+        output_format: "webp",
+        num_outputs: 1,
+      },
+    });
+
+    let directUrl = "";
+    if (Array.isArray(output) && output.length > 0) {
+      directUrl = typeof output[0] === "string" ? output[0] : (output[0]?.url ? output[0].url() : String(output[0]));
+    } else if (typeof output === "string") {
+      directUrl = output;
+    }
+
+    if (!directUrl) {
+      throw new Error("Replicate returned an empty character image output.");
+    }
+
+    let finalImageUrl = directUrl;
+
+    // Optional Cloudinary Upload for permanent CDN caching
     try {
-      console.log(`🚀 TIER 1: Attempting Nano Banana (Gemini API)...`);
-      // Note: Assuming the userApiKey passed from the frontend is a Google API key right now.
-      // If you separate keys in your settings, adjust the variable here.
-      finalImageBuffer = await fetchFromNanoBanana(enhancedPrompt, googleApiKey || '');
-      console.log(`✅ Success with Nano Banana!`);
-    } catch (nanoError: any) {
-      console.warn(`⚠️ Nano Banana Failed: ${nanoError.message}. Falling back to Tier 2...`);
-      lastError = nanoError.message;
-
-      // --- TIER 2: HUGGING FACE BYOK LOOP ---
-      const fallbackChain = [
-        { model: "black-forest-labs/FLUX.1-schnell", params: { num_inference_steps: 4, guidance_scale: 4.5 } },
-        { model: "stabilityai/sdxl-turbo", params: { num_inference_steps: 4, guidance_scale: 0.0 } },
-        { model: "runwayml/stable-diffusion-v1-5", params: { num_inference_steps: 25, guidance_scale: 7.5 } }
-      ];
-
-      for (const config of fallbackChain) {
-        try {
-          console.log(`➡️ TIER 2: Attempting HF model: ${config.model}...`);
-          // Using the same key here for demonstration. In production, ensure you pass the correct HF key from settings.
-          finalImageBuffer = await fetchFromHuggingFace(config.model, { inputs: enhancedPrompt, parameters: config.params }, hfKey || '');
-          console.log(`✅ Success with HF: ${config.model}`);
-          break; 
-        } catch (hfError: any) {
-          console.warn(`⚠️ Failed ${config.model}: ${hfError.message}`);
-          lastError = hfError.message;
-        }
+      const imgRes = await fetch(directUrl);
+      if (imgRes.ok) {
+        const imageBuffer = Buffer.from(await imgRes.arrayBuffer());
+        finalImageUrl = await new Promise<string>((resolve) => {
+          const uploadStream = cloudinary.uploader.upload_stream(
+            { 
+              folder: `director_ai/${projectId}/chars`,
+              public_id: `scene_${sceneNumber}_${charId}`,
+              overwrite: true
+            }, 
+            (error, result) => {
+              if (error || !result?.secure_url) {
+                console.warn("Cloudinary upload failed, using Replicate URL:", error?.message);
+                resolve(directUrl);
+              } else {
+                resolve(result.secure_url);
+              }
+            }
+          );
+          uploadStream.end(imageBuffer);
+        });
       }
+    } catch (cdnErr: any) {
+      console.warn("CDN sync skipped:", cdnErr.message);
     }
 
-    // --- TIER 3: THE NUCLEAR FAILSAFE (Pollinations.ai) ---
-    if (!finalImageBuffer) {
-      console.log(`🚨 Tiers 1 & 2 Overloaded. Triggering Pollinations Failsafe...`);
-      try {
-        const failsafePrompt = `${enhancedPrompt}, masterpiece, highly detailed, sharp focus, 8k resolution`;
-        const safePrompt = encodeURIComponent(failsafePrompt);
-        const seed = Math.floor(Math.random() * 1000000); 
-        
-        const pollinationsUrl = `https://image.pollinations.ai/prompt/${safePrompt}?width=1024&height=1024&nologo=true&seed=${seed}&model=flux`;
-
-        const pollResponse = await fetch(pollinationsUrl);
-        if (!pollResponse.ok) throw new Error(`Pollinations HTTP ${pollResponse.status}`);
-        
-        const arrayBuffer = await pollResponse.arrayBuffer();
-        finalImageBuffer = Buffer.from(arrayBuffer);
-        console.log(`✅ Success with Pollinations FLUX Failsafe!`);
-      } catch (pollError: any) {
-         throw new Error(`Total generator failure. Last Error: ${lastError}. Failsafe Error: ${pollError.message}`);
-      }
-    }
-    // -------------------------------------------------------
-
-    // 5. Stream Binary Blob to Cloudinary
-    const cdnUrl = await uploadBufferToCloudinary(
-      finalImageBuffer, 
-      `director_ai/${projectId}/chars`, 
-      `scene_${sceneNumber}_${charId}`
-    );
-
-   // 6. Update MongoDB
+    // Update MongoDB character slot
     const updatedProject = await Project.findOneAndUpdate(
       { _id: projectId, "storyboard.scene_number": sceneNumber },
-      { $set: { "storyboard.$.characters.$[char].generated_url": cdnUrl } },
-      // Make sure this says `returnDocument: 'after'` and NOT `new: true`
+      { $set: { "storyboard.$.characters.$[char].generated_url": finalImageUrl } },
       { arrayFilters: [{ "char._id": charId }], returnDocument: 'after' } 
     );
 
     if (!updatedProject) {
-      throw new Error("Failed to link generated image to database record.");
+      return NextResponse.json({ error: "Failed to link character image to project record." }, { status: 500 });
     }
 
-    return NextResponse.json({ imageUrl: cdnUrl });
+    return NextResponse.json({ imageUrl: finalImageUrl });
 
   } catch (error: any) {
-    console.error("🔥 Character Gen Error:", error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("🔥 Error in Generate Character:", error);
+    return NextResponse.json({ error: error.message || "Failed to generate character." }, { status: 500 });
   }
 }
