@@ -3,6 +3,7 @@ import { v2 as cloudinary } from "cloudinary";
 import Replicate from "replicate";
 import dbConnect from "@/lib/db";
 import { Project } from "@/models/Project";
+import { getAuthUser } from "@/lib/auth/getAuthUser";
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -28,6 +29,10 @@ export async function POST(req: Request) {
     }
 
     await dbConnect();
+    const { userId, isAuthenticated } = await getAuthUser(req);
+    if (!isAuthenticated || !userId) {
+      return NextResponse.json({ error: "Unauthorized: Valid access token required." }, { status: 401 });
+    }
 
     const enhancedPrompt = `
       Professional character concept sheet, studio portrait, neutral background. 
@@ -90,16 +95,22 @@ export async function POST(req: Request) {
       console.warn("CDN sync skipped:", cdnErr.message);
     }
 
-    // Update MongoDB character slot
-    const updatedProject = await Project.findOneAndUpdate(
-      { _id: projectId, "storyboard.scene_number": sceneNumber },
-      { $set: { "storyboard.$.characters.$[char].generated_url": finalImageUrl } },
-      { arrayFilters: [{ "char._id": charId }], returnDocument: 'after' } 
+    // Always update globalVault character anchor
+    await Project.updateOne(
+      { _id: projectId, userId },
+      { $set: { "globalVault.characterAnchor.imageUrl": finalImageUrl } }
     );
 
-    if (!updatedProject) {
-      return NextResponse.json({ error: "Failed to link character image to project record." }, { status: 500 });
-    }
+    // Also update storyboard character slot if present
+    await Project.updateOne(
+      { _id: projectId, userId, "storyboard.scene_number": sceneNumber },
+      { 
+        $set: { 
+          "storyboard.$.characters.$[char].generated_url": finalImageUrl,
+        } 
+      },
+      { arrayFilters: [{ "char._id": charId }] } 
+    ).catch(() => {});
 
     return NextResponse.json({ imageUrl: finalImageUrl });
 

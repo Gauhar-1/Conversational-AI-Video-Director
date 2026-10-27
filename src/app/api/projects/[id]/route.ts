@@ -1,65 +1,71 @@
-import { NextResponse } from "next/server";
-import dbConnect from "@/lib/db";
-import { Project } from "@/models/Project";
+/**
+ * @file src/app/api/projects/[id]/route.ts
+ * @description API route for individual Project operations (GET & PATCH).
+ * Strictly enforces token authentication, multi-tenant userId scoping, and Zod validation.
+ */
 
-// 1. Update the type definition: params is now a Promise
-export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+import { NextResponse } from "next/server";
+import { requireAuthUser } from "@/lib/auth/getAuthUser";
+import { ProjectService } from "@/lib/services/projectService";
+import { updateProjectSchema } from "@/lib/validations/project";
+
+export async function GET(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
-    await dbConnect();
-    
-    // 2. AWAIT the params to unwrap the ID before using it
+    const { userId } = await requireAuthUser(req);
     const { id } = await params;
-    
-    // 3. Use the unwrapped ID
-    const project = await Project.findById(id).lean();
-    
+
+    const project = await ProjectService.getProjectById(userId, id);
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
-    return NextResponse.json(project);
+    return NextResponse.json(project.toObject ? project.toObject() : project);
   } catch (error: any) {
+    if (error.status === 401) {
+      return NextResponse.json({ error: "Unauthorized: Access token required." }, { status: 401 });
+    }
     console.error("Failed to fetch project:", error);
     return NextResponse.json({ error: "Failed to fetch project" }, { status: 500 });
   }
 }
 
-export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
-    await dbConnect();
-    
-    // 1. AWAIT the params to unwrap the ID
+    const { userId } = await requireAuthUser(req);
     const { id } = await params;
-    
-    // 2. Parse the request body
     const body = await req.json();
-    const { title } = body;
 
-    // 3. Validate the input
-    if (!title || typeof title !== "string" || title.trim() === "") {
-      return NextResponse.json({ error: "A valid title is required" }, { status: 400 });
+    const validationResult = updateProjectSchema.safeParse(body);
+    if (!validationResult.success) {
+      return NextResponse.json(
+        { error: "Validation failed", details: validationResult.error.format() },
+        { status: 400 }
+      );
     }
 
-    // 4. Update the project using Mongoose
-    // { new: true } ensures it returns the updated document
-    // runValidators ensures it adheres to your Mongoose schema rules
-    const updatedProject = await Project.findByIdAndUpdate(
-      id,
-      { $set: { title: title.trim() } },
-      { new: true, runValidators: true }
-    ).lean();
-
+    const updatedProject = await ProjectService.updateProject(userId, id, validationResult.data);
     if (!updatedProject) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ 
-      success: true, 
-      message: "Project title updated successfully",
-      project: updatedProject 
-    }, { status: 200 });
-
+    return NextResponse.json(
+      {
+        success: true,
+        message: "Project updated successfully",
+        project: updatedProject,
+      },
+      { status: 200 }
+    );
   } catch (error: any) {
+    if (error.status === 401) {
+      return NextResponse.json({ error: "Unauthorized: Access token required." }, { status: 401 });
+    }
     console.error("Failed to update project:", error);
     return NextResponse.json({ error: "Failed to update project" }, { status: 500 });
   }

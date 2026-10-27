@@ -9,131 +9,124 @@ type SettingsModalProps = {
 };
 
 export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-  // --- STATES FOR BYOK (Bring Your Own Key) ---
   const [groqKey, setGroqKey] = useState("");
   const [replicateKey, setReplicateKey] = useState("");
   const [isSaved, setIsSaved] = useState(false);
 
-  // Load saved settings when the modal opens
   useEffect(() => {
-    if (isOpen) {
-      setGroqKey(localStorage.getItem("groq_api_key") || "");
-      setReplicateKey(localStorage.getItem("replicate_api_key") || "");
-      setIsSaved(false);
+    if (typeof window !== "undefined") {
+      setGroqKey(localStorage.getItem("director_groq_key") || "");
+      setReplicateKey(localStorage.getItem("director_replicate_key") || "");
     }
   }, [isOpen]);
 
   const handleSave = () => {
-    localStorage.setItem("groq_api_key", groqKey.trim());
-    localStorage.setItem("replicate_api_key", replicateKey.trim());
-    
-    setIsSaved(true);
-    setTimeout(() => {
-      setIsSaved(false);
-      onClose();
-    }, 1000); 
+    if (typeof window !== "undefined") {
+      localStorage.setItem("director_groq_key", groqKey.trim());
+      localStorage.setItem("director_replicate_key", replicateKey.trim());
+      setIsSaved(true);
+      setTimeout(() => {
+        setIsSaved(false);
+        onClose();
+      }, 900);
+    }
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 sm:p-6">
-      {/* Blurred Backdrop */}
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+      {/* Backdrop */}
       <div 
-        className="absolute inset-0 bg-black/80 backdrop-blur-md animate-in fade-in duration-300" 
+        className="absolute inset-0 bg-black/80 backdrop-blur-sm" 
         onClick={onClose}
       />
 
       {/* Modal Content */}
-      <div className="relative w-full max-w-lg bg-[#0a0a0c] border border-zinc-800 rounded-3xl shadow-[0_0_80px_-15px_rgba(99,102,241,0.15)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-300">
-        
-        {/* --- HEADER --- */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800/80 bg-zinc-900/40">
+      <div className="relative w-full max-w-lg bg-zinc-950 border border-zinc-800 rounded-md shadow-2xl flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-900/40">
           <div>
-            <h2 className="text-xl font-extrabold text-white flex items-center gap-2 tracking-wide">
-              <Key className="w-5 h-5 text-indigo-400" />
-              Environment Variables
+            <h2 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
+              <Key className="w-4 h-4 text-zinc-400" />
+              <span>BYOK API Configuration</span>
             </h2>
-            <p className="text-[11px] text-zinc-500 mt-1 uppercase tracking-wider font-semibold">Zero-Liability BYOK Architecture</p>
+            <p className="text-[11px] text-zinc-500 font-mono mt-0.5">
+              Client-side persistent environment keys (Zero-Liability Vault)
+            </p>
           </div>
-          <button onClick={onClose} className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-xl transition-colors border border-transparent hover:border-zinc-700">
-            <X className="w-5 h-5" />
+          <button 
+            onClick={onClose} 
+            className="w-8 h-8 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-md transition-colors"
+          >
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* --- BODY --- */}
-        <div className="p-6 space-y-6 overflow-y-auto max-h-[75vh] custom-scrollbar">
-          
-          {/* SECTION 1: GROQ (Director Brain & Chat Model) */}
-          <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-5 space-y-4 hover:border-amber-500/30 transition-colors relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none"><Cpu className="w-32 h-32" /></div>
-            
-            <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2 border-b border-zinc-800/80 pb-3 relative z-10">
-              <Cpu className="w-4 h-4 text-amber-400" /> 
-              Director AI Brain (Groq - openai/gpt-oss-20b)
+        {/* Body */}
+        <div className="p-6 space-y-5 overflow-y-auto max-h-[75vh] custom-scrollbar">
+          {/* SECTION 1: GROQ */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-md p-4 space-y-3">
+            <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-2 font-mono uppercase tracking-wider">
+              <Cpu className="w-4 h-4 text-zinc-400" /> 
+              <span>Director Brain (Groq 20B)</span>
             </h3>
-            <p className="text-[11px] text-amber-400/80 font-medium pb-1 relative z-10">
-              Powered by OpenAI's open-weight reasoning model (`openai/gpt-oss-20b`) on Groq for sub-second screenplay directing, script continuity, and JSON storyboard synthesis.
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              OpenAI reasoning model (<code className="text-zinc-200 font-mono text-[11px]">openai/gpt-oss-20b</code>) for sub-second screenplay directing and JSON storyboard synthesis.
             </p>
 
-            <div className="space-y-2 relative z-10">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Groq API Key</label>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-mono uppercase tracking-wider text-zinc-500">Groq API Key</label>
               <input 
                 type="password" 
                 value={groqKey} 
                 onChange={(e) => setGroqKey(e.target.value)} 
                 placeholder="gsk_..."
-                className="w-full bg-[#0a0a0c] border border-zinc-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all font-mono shadow-inner"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700 font-mono"
               />
             </div>
           </div>
 
-          {/* SECTION 2: REPLICATE (Unified Media Engine) */}
-          <div className="bg-zinc-900/40 border border-zinc-800 rounded-2xl p-5 space-y-4 hover:border-indigo-500/30 transition-colors relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none"><Layers className="w-32 h-32" /></div>
-            
-            <h3 className="text-sm font-bold text-zinc-200 flex items-center gap-2 border-b border-zinc-800/80 pb-3 relative z-10">
-              <Layers className="w-4 h-4 text-indigo-400" /> 
-              Visual & Video Engine (Replicate)
+          {/* SECTION 2: REPLICATE */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-md p-4 space-y-3">
+            <h3 className="text-xs font-semibold text-zinc-200 flex items-center gap-2 font-mono uppercase tracking-wider">
+              <Layers className="w-4 h-4 text-zinc-400" /> 
+              <span>Generative Video &amp; FLUX (Replicate)</span>
             </h3>
-            <p className="text-[11px] text-indigo-400/80 font-medium pb-1 relative z-10">
-              Powers FLUX background & character generation, start frames, and high-fidelity video rendering models (Kling, Wan, MiniMax).
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              Powers FLUX Schnell keyframes and high-fidelity video rendering models (Kling 2.5 Turbo Pro, Wan 2.5, MiniMax).
             </p>
 
-            <div className="space-y-2 relative z-10">
-              <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Replicate API Token</label>
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-mono uppercase tracking-wider text-zinc-500">Replicate API Token</label>
               <input 
                 type="password" 
                 value={replicateKey} 
                 onChange={(e) => setReplicateKey(e.target.value)} 
                 placeholder="r8_..."
-                className="w-full bg-[#0a0a0c] border border-zinc-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono shadow-inner"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700 font-mono"
               />
             </div>
           </div>
-
         </div>
 
-        {/* --- FOOTER --- */}
-        <div className="px-6 py-4 border-t border-zinc-800/80 bg-zinc-900/40 flex justify-end gap-3">
+        {/* Footer */}
+        <div className="px-6 py-3.5 border-t border-zinc-800 bg-zinc-900/40 flex justify-end gap-2.5">
           <button 
             onClick={onClose}
-            className="px-6 py-2.5 rounded-xl text-sm font-bold text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors border border-transparent hover:border-zinc-700"
+            className="px-4 py-2 rounded-md text-xs font-medium text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
           >
             Cancel
           </button>
           <button 
             onClick={handleSave}
             disabled={isSaved}
-            className={`flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold text-white transition-all ${
-              isSaved ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-indigo-600 hover:bg-indigo-500 shadow-[0_0_20px_-5px_rgba(99,102,241,0.5)]'
-            }`}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-md bg-zinc-100 text-zinc-950 hover:bg-white text-xs font-semibold transition-colors disabled:opacity-50"
           >
-            {isSaved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-            {isSaved ? "Keys Secured" : "Save Pipeline State"}
+            {isSaved ? <Check className="w-3.5 h-3.5" /> : <Save className="w-3.5 h-3.5" />}
+            <span>{isSaved ? "Saved" : "Save Credentials"}</span>
           </button>
         </div>
-
       </div>
     </div>
   );

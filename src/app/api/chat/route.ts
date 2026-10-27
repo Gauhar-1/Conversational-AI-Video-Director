@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import dbConnect from "@/lib/db"; 
 import { Project } from "@/models/Project";
 import OpenAI from "openai";
+import { getAuthUser } from "@/lib/auth/getAuthUser";
+import { repairAndParseJson } from "@/lib/utils/jsonRepair";
 
 export async function POST(req: Request) {
   try {
@@ -39,13 +41,17 @@ export async function POST(req: Request) {
     }
 
     // ---------------------------------------------------------
-    // 2. PROJECT STATE MANAGEMENT
+    // 2. PROJECT STATE MANAGEMENT WITH USER ISOLATION
     // ---------------------------------------------------------
+    const { userId, isAuthenticated } = await getAuthUser(req);
+    if (!isAuthenticated || !userId) {
+      return NextResponse.json({ error: "Unauthorized: Valid access token required." }, { status: 401 });
+    }
     let project;
     if (!projectId) {
-      project = await Project.create({ title: "New Cinematic Project", chatHistory: [], visualMetadata: {} });
+      project = await Project.create({ userId, title: "New Cinematic Project", chatHistory: [], visualMetadata: {} });
     } else {
-      project = await Project.findById(projectId);
+      project = await Project.findOne({ _id: projectId, userId });
       if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
@@ -219,7 +225,7 @@ export async function POST(req: Request) {
            const startIdx = aiMessageText.indexOf("[VISUAL_METADATA_START]") + "[VISUAL_METADATA_START]".length;
            const endIdx = aiMessageText.indexOf("[VISUAL_METADATA_END]");
            const jsonStr = aiMessageText.substring(startIdx, endIdx).trim();
-           const parsedMeta = JSON.parse(jsonStr);
+           const parsedMeta = repairAndParseJson(jsonStr);
            
            project.visualMetadata = { ...project.visualMetadata, ...parsedMeta };
            project.markModified('visualMetadata');
@@ -234,23 +240,42 @@ export async function POST(req: Request) {
     // B. Intercept Final Storyboard Array
     if (isStoryboardIntent) {
        try {
-         const firstBracket = aiMessageText.indexOf('[');
-         let lastBracket = aiMessageText.lastIndexOf(']');
-         let jsonString = "";
-
-         if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
-           jsonString = aiMessageText.substring(firstBracket, lastBracket + 1);
-         } else if (firstBracket !== -1 && lastBracket === -1) {
-           jsonString = aiMessageText.substring(firstBracket) + '"}]'; 
-         } else {
-            throw new Error("Could not find a valid JSON array start bracket.");
-         }
-         
-         const sanitizedJson = jsonString.replace(/\n/g, " ").replace(/\r/g, "");
-         const storyboardData = JSON.parse(sanitizedJson);
+         const storyboardData = repairAndParseJson(aiMessageText);
          
          if (Array.isArray(storyboardData)) {
             project.storyboard = storyboardData;
+
+            // Populate strict NLE scenes array
+            const angles = ['CAM_A_CENTER', 'CAM_B_45_CLOSE', 'CAM_C_OTS'] as const;
+            project.scenes = storyboardData.map((s: any, idx: number) => ({
+              sceneId: `scene-${s.scene_number || idx + 1}`,
+              order: s.scene_number || idx + 1,
+              duration: 10,
+              cameraAngle: angles[idx % 3],
+              rawDelta: s.action || s.location || `Scene ${idx + 1} action`,
+              imagePrompt: s.frame_prompt ? `[${angles[idx % 3]}]: ${s.frame_prompt}` : `[${angles[idx % 3]}]: Master composition for Scene ${idx + 1}`,
+              motionPrompt: s.video_prompt ? `[${angles[idx % 3]}]: ${s.video_prompt}` : `[${angles[idx % 3]}]: 10-second temporal motion`,
+              firstFrameUrl: s.frame_url || "",
+              lastFrameUrl: "",
+              videoUrl: s.video_url || "",
+              status: "ready"
+            }));
+
+            // Initialize Global Vault
+            project.globalVault = {
+              characterAnchor: {
+                description: storyboardData[0]?.characters?.[0]?.appearance_prompt || project.visualMetadata?.style || "Lead protagonist with cinematic detailing",
+                imageUrl: "",
+                replicatePulidSeed: 42
+              },
+              environmentAnchor: {
+                description: storyboardData[0]?.environment_prompt || storyboardData[0]?.location || "Volumetric atmospheric environment",
+                imageUrl: "",
+                lightingProfile: project.visualMetadata?.lighting || "High contrast cinematic rim lighting"
+              },
+              aspectRatio: "9:16"
+            };
+
             aiMessageText = "The sequence is locked. I have compiled the Node Compositor Architecture. You can now view and render the pipeline on the Canvas.";
          }
        } catch (err) {
@@ -268,7 +293,9 @@ export async function POST(req: Request) {
     return NextResponse.json({
       message: { id: Date.now().toString(), role: "assistant", content: aiMessageText },
       projectId: project._id, 
-      storyboard: project.storyboard
+      storyboard: project.storyboard,
+      scenes: project.scenes,
+      globalVault: project.globalVault
     });
 
   } catch (error: any) {

@@ -1,0 +1,309 @@
+"use client";
+
+import { memo, useState, useEffect } from "react";
+import { Handle, Position, NodeProps } from "@xyflow/react";
+import { CameraAngle, ISceneDoc } from "@/models/Project";
+import { Film, Sparkles, Loader2, Play, ChevronDown, CheckCircle2, User, Mountain, Image as ImageIcon, SlidersHorizontal } from "lucide-react";
+import { IGlobalVault } from "@/models/Project";
+
+const ANGLE_LABELS: Record<CameraAngle, { short: string; full: string; badge: string }> = {
+  CAM_A_CENTER: { short: "CAM A", full: "Wide Center", badge: "bg-zinc-800 text-zinc-200 border-zinc-700" },
+  CAM_B_45_CLOSE: { short: "CAM B", full: "45° Close", badge: "bg-zinc-800 text-zinc-200 border-zinc-700" },
+  CAM_C_OTS: { short: "CAM C", full: "Over Shoulder", badge: "bg-zinc-800 text-zinc-200 border-zinc-700" },
+};
+
+export const SceneMacroNode = memo(({ data, selected }: NodeProps) => {
+  const {
+    scene,
+    storyboardItem,
+    globalVault,
+    onSelect,
+    onUpdateAngle,
+    onEnrichDelta,
+    isEnriching = false,
+  } = data as {
+    scene: ISceneDoc;
+    storyboardItem?: any;
+    globalVault?: IGlobalVault;
+    onSelect?: (scene: ISceneDoc) => void;
+    onUpdateAngle?: (sceneId: string, angle: CameraAngle) => void;
+    onEnrichDelta?: (sceneId: string, rawDelta: string, angle: CameraAngle) => void;
+    isEnriching?: boolean;
+  };
+
+  const charUrl = storyboardItem?.characters?.[0]?.generated_url || globalVault?.characterAnchor?.imageUrl;
+  const bgUrl = storyboardItem?.background_url || globalVault?.environmentAnchor?.imageUrl;
+
+  const [deltaInput, setDeltaInput] = useState(scene.rawDelta || "");
+  const [currentAngle, setCurrentAngle] = useState<CameraAngle>(scene.cameraAngle || "CAM_A_CENTER");
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  useEffect(() => {
+    setDeltaInput(scene.rawDelta || "");
+  }, [scene.rawDelta]);
+
+  useEffect(() => {
+    setCurrentAngle(scene.cameraAngle || "CAM_A_CENTER");
+  }, [scene.cameraAngle]);
+
+  const handleAngleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    e.stopPropagation();
+    const newAngle = e.target.value as CameraAngle;
+    setCurrentAngle(newAngle);
+    if (onUpdateAngle) {
+      onUpdateAngle(scene.sceneId, newAngle);
+    }
+  };
+
+  const handleEnrichClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onEnrichDelta) {
+      onEnrichDelta(scene.sceneId, deltaInput, currentAngle);
+    }
+  };
+
+  const angleConfig = ANGLE_LABELS[currentAngle] || ANGLE_LABELS.CAM_A_CENTER;
+  const isGenerating = scene.status === "generating";
+  const isEnrichingState = isEnriching || scene.status === "enriching";
+
+  return (
+    <div
+      onClick={() => onSelect && onSelect(scene)}
+      className={`w-72 bg-zinc-900 border rounded-md shadow-xl overflow-hidden transition-colors duration-150 cursor-pointer ${
+        selected
+          ? "border-zinc-300 ring-1 ring-zinc-400"
+          : "border-zinc-800 hover:border-zinc-700"
+      }`}
+    >
+      {/* Node Temporal Flow Handles */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="left"
+        className="w-3 h-3 bg-zinc-400 border border-zinc-950 -left-[6px] rounded-sm"
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="right"
+        className="w-3 h-3 bg-zinc-100 border border-zinc-950 -right-[6px] rounded-sm"
+      />
+
+      {/* --- HEADER --- */}
+      <div className="p-3 bg-zinc-950 border-b border-zinc-800 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-mono font-semibold bg-zinc-900 text-zinc-100 px-2 py-0.5 rounded border border-zinc-800">
+            SCENE {String(scene.order).padStart(2, "0")}
+          </span>
+          <span className="text-[10px] font-mono text-zinc-500">{scene.duration || 10}s</span>
+        </div>
+
+        {/* Camera Angle Dropdown */}
+        <div className="relative" onClick={(e) => e.stopPropagation()}>
+          <select
+            value={currentAngle}
+            onChange={handleAngleChange}
+            className={`text-[11px] font-mono font-medium pl-2 pr-6 py-0.5 rounded border appearance-none outline-none cursor-pointer transition-colors ${angleConfig.badge}`}
+          >
+            <option value="CAM_A_CENTER" className="bg-zinc-900 text-zinc-200">
+              CAM A (Center)
+            </option>
+            <option value="CAM_B_45_CLOSE" className="bg-zinc-900 text-zinc-200">
+              CAM B (45° Close)
+            </option>
+            <option value="CAM_C_OTS" className="bg-zinc-900 text-zinc-200">
+              CAM C (OTS)
+            </option>
+          </select>
+          <ChevronDown className="w-3 h-3 absolute right-1.5 top-1.5 pointer-events-none opacity-60 text-zinc-400" />
+        </div>
+      </div>
+
+      {/* --- 9:16 MEDIA PREVIEW SLOT --- */}
+      <div className="p-3 bg-zinc-950">
+        <div className="w-full aspect-[9/16] bg-zinc-900 rounded-md overflow-hidden border border-zinc-800 relative flex items-center justify-center group/media">
+          {/* Active Video Player */}
+          {scene.videoUrl ? (
+            <div className="w-full h-full relative">
+              <video
+                src={scene.videoUrl}
+                className="w-full h-full object-cover"
+                loop
+                muted
+                playsInline
+                autoPlay={isPlaying}
+                onMouseEnter={(e) => {
+                  setIsPlaying(true);
+                  e.currentTarget.play().catch(() => {});
+                }}
+                onMouseLeave={(e) => {
+                  setIsPlaying(false);
+                  e.currentTarget.pause();
+                }}
+              />
+              {!isPlaying && (
+                <div className="absolute inset-0 bg-black/40 flex items-center justify-center pointer-events-none">
+                  <div className="w-8 h-8 rounded-full bg-zinc-950/80 border border-zinc-700 flex items-center justify-center text-zinc-200">
+                    <Play className="w-4 h-4 ml-0.5" />
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : scene.firstFrameUrl ? (
+            /* First Frame Keyframe Preview */
+            <div className="w-full h-full relative">
+              <img
+                src={scene.firstFrameUrl}
+                alt={`Scene ${scene.order}`}
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end p-2">
+                <span className="text-[10px] font-mono text-zinc-300">Keyframe Ready</span>
+              </div>
+            </div>
+          ) : isGenerating ? (
+            /* Generating State */
+            <div className="w-full h-full flex flex-col items-center justify-center gap-2 p-4 bg-zinc-950 text-center">
+              <Loader2 className="w-6 h-6 text-zinc-400 animate-spin" />
+              <span className="text-[11px] font-mono text-zinc-300">Rendering Clip...</span>
+            </div>
+          ) : (
+            /* Empty State */
+            <div className="w-full h-full flex flex-col items-center justify-center gap-2 p-4 text-center text-zinc-600">
+              <Film className="w-7 h-7 opacity-40 text-zinc-500" />
+              <span className="text-[11px] font-mono text-zinc-400">9:16 Vertical Slot</span>
+              <span className="text-[10px] text-zinc-600">Pending Execution</span>
+            </div>
+          )}
+
+          {/* Camera watermark */}
+          <div className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded bg-zinc-950/80 text-[9px] font-mono text-zinc-300 border border-zinc-800">
+            {angleConfig.short}
+          </div>
+        </div>
+      </div>
+
+      {/* --- ASSET OVERVIEW STRIP (Keyframe, Character, Environment) --- */}
+      <div className="px-3 py-2 bg-zinc-950 border-t border-zinc-800/80 grid grid-cols-3 gap-1.5 nodrag">
+        {/* Keyframe asset pill */}
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            if (onSelect) onSelect(scene);
+          }}
+          className="flex items-center gap-1.5 p-1 rounded bg-zinc-900 border border-zinc-800 hover:border-zinc-700 transition-colors cursor-pointer group"
+          title={`First Frame: ${scene.firstFrameUrl ? "Generated" : "Pending"}`}
+        >
+          <div className="w-5 h-5 rounded overflow-hidden bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
+            {scene.firstFrameUrl ? (
+              <img src={scene.firstFrameUrl} alt="Frame" className="w-full h-full object-cover" />
+            ) : (
+              <ImageIcon className="w-3 h-3 text-zinc-500 group-hover:text-zinc-300" />
+            )}
+          </div>
+          <span className="text-[9px] font-mono text-zinc-400 truncate">Frame</span>
+        </div>
+
+        {/* Character asset pill */}
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            if (onSelect) onSelect(scene);
+          }}
+          className="flex items-center gap-1.5 p-1 rounded bg-zinc-900 border border-zinc-800 hover:border-zinc-700 transition-colors cursor-pointer group"
+          title={`Character: ${charUrl ? "Anchored" : "Pending"}`}
+        >
+          <div className="w-5 h-5 rounded overflow-hidden bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
+            {charUrl ? (
+              <img src={charUrl} alt="Character" className="w-full h-full object-cover" />
+            ) : (
+              <User className="w-3 h-3 text-zinc-500 group-hover:text-zinc-300" />
+            )}
+          </div>
+          <span className="text-[9px] font-mono text-zinc-400 truncate">Protagonist</span>
+        </div>
+
+        {/* Environment asset pill */}
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            if (onSelect) onSelect(scene);
+          }}
+          className="flex items-center gap-1.5 p-1 rounded bg-zinc-900 border border-zinc-800 hover:border-zinc-700 transition-colors cursor-pointer group"
+          title={`Environment: ${bgUrl ? "Set" : "Pending"}`}
+        >
+          <div className="w-5 h-5 rounded overflow-hidden bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
+            {bgUrl ? (
+              <img src={bgUrl} alt="Environment" className="w-full h-full object-cover" />
+            ) : (
+              <Mountain className="w-3 h-3 text-zinc-500 group-hover:text-zinc-300" />
+            )}
+          </div>
+          <span className="text-[9px] font-mono text-zinc-400 truncate">Environment</span>
+        </div>
+      </div>
+
+      {/* --- INLINE EDIT ACTION DELTA & INSPECTOR TRIGGER --- */}
+      <div className="p-3 bg-zinc-950 border-t border-zinc-800 space-y-2">
+        <div className="flex items-center justify-between text-[10px] text-zinc-400 font-mono uppercase tracking-wider">
+          <span>Action Delta</span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onSelect) onSelect(scene);
+            }}
+            className="text-[9px] font-mono text-zinc-400 hover:text-white flex items-center gap-1 transition-colors"
+          >
+            <SlidersHorizontal className="w-3 h-3" />
+            <span>Inspector</span>
+          </button>
+        </div>
+
+        <div className="relative">
+          <textarea
+            value={deltaInput}
+            onChange={(e) => setDeltaInput(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            placeholder="Director intent (e.g. Hero steps forward...)"
+            rows={2}
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-zinc-700 resize-none font-sans leading-relaxed custom-scrollbar"
+          />
+        </div>
+
+        {/* Action Buttons: Enrich Delta & Inspect */}
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={handleEnrichClick}
+            disabled={isEnrichingState}
+            className="h-8 flex items-center justify-center gap-1.5 rounded-md bg-zinc-100 text-zinc-950 hover:bg-white text-xs font-semibold transition-colors disabled:opacity-50"
+          >
+            {isEnrichingState ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Enriching...</span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Enrich Delta</span>
+              </>
+            )}
+          </button>
+
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onSelect) onSelect(scene);
+            }}
+            className="h-8 flex items-center justify-center gap-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 text-xs font-medium transition-colors"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5 text-zinc-400" />
+            <span>Open Assets</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+SceneMacroNode.displayName = "SceneMacroNode";

@@ -1,21 +1,56 @@
-import { NextResponse } from "next/server";
-import dbConnect from "@/lib/db";
-import { Project } from "@/models/Project";
+/**
+ * @file src/app/api/projects/route.ts
+ * @description API route for Project collection operations (Listing & Creation).
+ * Enforces token authentication, multi-tenant user isolation, and Zod validation.
+ */
 
-export async function GET() {
+import { NextResponse } from "next/server";
+import { requireAuthUser } from "@/lib/auth/getAuthUser";
+import { ProjectService } from "@/lib/services/projectService";
+import { createProjectSchema } from "@/lib/validations/project";
+
+export async function GET(req: Request) {
   try {
-    await dbConnect();
-    
-    // Fetch all projects, but ONLY grab the ID, Title, and Date. 
-    // We don't want to load massive chat histories just for the sidebar!
-    const projects = await Project.find({})
-      .select("_id title updatedAt")
-      .sort({ updatedAt: -1 }) // Sort by newest first
-      .lean();
+    const { userId } = await requireAuthUser(req);
+    const projects = await ProjectService.getProjectsByUser(userId);
 
     return NextResponse.json(projects);
   } catch (error: any) {
+    if (error.status === 401) {
+      return NextResponse.json({ error: "Unauthorized: Access token required." }, { status: 401 });
+    }
     console.error("Failed to fetch projects:", error);
-    return NextResponse.json({ error: "Failed to fetch project history" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to fetch project history" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const { userId } = await requireAuthUser(req);
+    const body = await req.json().catch(() => ({}));
+
+    // Validate request payload
+    const validationResult = createProjectSchema.safeParse(body);
+    if (!validationResult.success) {
+      return NextResponse.json(
+        { error: "Validation failed", details: validationResult.error.format() },
+        { status: 400 }
+      );
+    }
+
+    const newProject = await ProjectService.createProject(userId, validationResult.data);
+    return NextResponse.json(newProject, { status: 201 });
+  } catch (error: any) {
+    if (error.status === 401) {
+      return NextResponse.json({ error: "Unauthorized: Access token required." }, { status: 401 });
+    }
+    console.error("Failed to create project:", error);
+    return NextResponse.json(
+      { error: "Failed to create project" },
+      { status: 500 }
+    );
   }
 }

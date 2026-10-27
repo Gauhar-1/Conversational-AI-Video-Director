@@ -2,70 +2,87 @@
 
 import { useState, useRef, useEffect, memo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ImageIcon, Send, Loader2, Bot, User, X, LayoutTemplate, ChevronRight, Check, XCircle, Edit3, Minimize2, Maximize, Sparkles } from "lucide-react";
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { ImageIcon, Send, Loader2, Bot, User, X, Check, Edit3, Sparkles } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type Message = { _id?: string; role: "user" | "assistant"; content: string; timestamp: string; isOptimistic?: boolean };
 
 // ==========================================
-// 1. PRODUCTION-READY MESSAGE COMPONENT (GITHUB STYLE MARKDOWN)
+// 1. STUDIO-GRADE MESSAGE COMPONENT (MONOCHROMATIC)
 // ==========================================
 const ChatMessage = memo(function ChatMessage({ msg }: { msg: Message }) {
   const isUser = msg.role === "user";
-  
+
   return (
-    <div className={`flex items-end gap-2 sm:gap-3 ${isUser ? "flex-row-reverse" : ""} ${msg.isOptimistic ? "opacity-60" : "opacity-100"} transition-opacity duration-300`}>
-      
+    <div
+      className={`flex items-start gap-3 ${
+        isUser ? "flex-row-reverse" : ""
+      } ${msg.isOptimistic ? "opacity-60" : "opacity-100"} transition-opacity duration-200`}
+    >
       {/* Avatar */}
-      <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 shadow-sm border ${
-        isUser ? "bg-indigo-600 border-indigo-500" : "bg-zinc-800 border-zinc-700"
-      }`}>
-        {isUser ? <User className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-50" /> : <Bot className="w-4 h-4 sm:w-5 sm:h-5 text-zinc-300" />}
+      <div
+        className={`w-8 h-8 rounded-md flex items-center justify-center shrink-0 border ${
+          isUser
+            ? "bg-zinc-800 border-zinc-700 text-zinc-100"
+            : "bg-zinc-900 border-zinc-800 text-zinc-400"
+        }`}
+      >
+        {isUser ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
       </div>
-      
-      {/* Message Bubble - Adjusted max-width for better full-screen responsiveness */}
-      <div className={`max-w-[90%] md:max-w-[85%] lg:max-w-[80%] px-4 sm:px-5 py-3 sm:py-4 shadow-md text-[14px] sm:text-[15px] leading-relaxed ${
-        isUser 
-          ? "bg-indigo-600 text-white rounded-2xl rounded-br-sm" 
-          : "bg-zinc-800/80 backdrop-blur-sm text-zinc-100 rounded-2xl rounded-bl-sm border border-zinc-700/50"
-      }`}>
-        
-        {/* GitHub Style Markdown Engine */}
-        <div className="markdown-body text-sm sm:text-base break-words w-full overflow-hidden">
-          <ReactMarkdown 
+
+      {/* Message Bubble */}
+      <div
+        className={`max-w-[85%] px-4 py-3 text-sm leading-relaxed rounded-md border ${
+          isUser
+            ? "bg-zinc-900 text-zinc-100 border-zinc-800 shadow-sm"
+            : "bg-zinc-950/90 text-zinc-200 border-zinc-800/80"
+        }`}
+      >
+        <div className="markdown-body text-sm break-words w-full overflow-hidden">
+          <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
-              h1: ({node, ...props}) => <h1 className="text-xl sm:text-2xl font-bold mt-6 mb-4 pb-2 border-b border-zinc-700/50 text-white" {...props} />,
-              h2: ({node, ...props}) => <h2 className="text-lg sm:text-xl font-bold mt-5 mb-3 pb-2 border-b border-zinc-700/50 text-white" {...props} />,
-              h3: ({node, ...props}) => <h3 className="text-base sm:text-lg font-bold mt-4 mb-2 text-zinc-200" {...props} />,
-              p: ({node, ...props}) => <p className="mb-4 last:mb-0 leading-relaxed" {...props} />,
-              ul: ({node, ...props}) => <ul className="list-disc pl-6 mb-4 space-y-1 text-zinc-200" {...props} />,
-              ol: ({node, ...props}) => <ol className="list-decimal pl-6 mb-4 space-y-1 text-zinc-200" {...props} />,
-              li: ({node, ...props}) => <li className="pl-1" {...props} />,
-              strong: ({node, ...props}) => <strong className="font-bold text-white" {...props} />,
-              // Beautiful Table Styling
-              table: ({node, ...props}) => (
-                <div className="overflow-x-auto mb-4 w-full rounded-lg border border-zinc-700">
-                  <table className="w-full text-left border-collapse" {...props} />
+              h1: ({ node, ...props }) => (
+                <h1 className="text-lg font-semibold mt-4 mb-2 pb-1 border-b border-zinc-800 text-zinc-100" {...props} />
+              ),
+              h2: ({ node, ...props }) => (
+                <h2 className="text-base font-semibold mt-3 mb-2 pb-1 border-b border-zinc-800 text-zinc-100" {...props} />
+              ),
+              h3: ({ node, ...props }) => (
+                <h3 className="text-sm font-semibold mt-3 mb-1 text-zinc-200" {...props} />
+              ),
+              p: ({ node, ...props }) => <p className="mb-3 last:mb-0 leading-relaxed text-zinc-300" {...props} />,
+              ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-3 space-y-1 text-zinc-300" {...props} />,
+              ol: ({ node, ...props }) => <ol className="list-decimal pl-5 mb-3 space-y-1 text-zinc-300" {...props} />,
+              li: ({ node, ...props }) => <li className="pl-1" {...props} />,
+              strong: ({ node, ...props }) => <strong className="font-semibold text-zinc-100" {...props} />,
+              table: ({ node, ...props }) => (
+                <div className="overflow-x-auto mb-3 w-full rounded-md border border-zinc-800">
+                  <table className="w-full text-left border-collapse text-xs" {...props} />
                 </div>
               ),
-              thead: ({node, ...props}) => <thead className="bg-zinc-900/80 text-zinc-300" {...props} />,
-              th: ({node, ...props}) => <th className="px-4 py-3 font-semibold border-b border-zinc-700 text-sm uppercase tracking-wider" {...props} />,
-              td: ({node, ...props}) => <td className="px-4 py-3 border-b border-zinc-700/50 text-zinc-300 last:border-0" {...props} />,
-              // Stylized Blockquotes
-              blockquote: ({node, ...props}) => (
-                <blockquote className="border-l-4 border-indigo-500 pl-4 py-1 italic text-zinc-400 bg-zinc-900/30 rounded-r-lg my-4" {...props} />
+              thead: ({ node, ...props }) => <thead className="bg-zinc-900 text-zinc-300" {...props} />,
+              th: ({ node, ...props }) => (
+                <th className="px-3 py-2 font-medium border-b border-zinc-800 uppercase tracking-wider" {...props} />
               ),
-              // Code Block Styling
-              code: ({node, inline, className, children, ...props}: any) => {
+              td: ({ node, ...props }) => (
+                <td className="px-3 py-2 border-b border-zinc-800/60 text-zinc-300 last:border-0" {...props} />
+              ),
+              blockquote: ({ node, ...props }) => (
+                <blockquote
+                  className="border-l-2 border-zinc-600 pl-3 py-1 italic text-zinc-400 bg-zinc-900/40 rounded-r-md my-3"
+                  {...props}
+                />
+              ),
+              code: ({ node, inline, className, children, ...props }: any) => {
                 return inline ? (
-                  <code className="bg-zinc-900 text-indigo-300 px-1.5 py-0.5 rounded-md text-[13px] font-mono border border-zinc-700/50" {...props}>
+                  <code className="bg-zinc-800 text-zinc-200 px-1 py-0.5 rounded text-xs font-mono border border-zinc-700/60" {...props}>
                     {children}
                   </code>
                 ) : (
-                  <div className="relative group my-4">
-                    <pre className="bg-[#0d1117] text-zinc-300 p-4 rounded-xl overflow-x-auto text-[13px] sm:text-sm font-mono border border-zinc-800 shadow-inner">
+                  <div className="relative my-3">
+                    <pre className="bg-zinc-950 text-zinc-300 p-3 rounded-md overflow-x-auto text-xs font-mono border border-zinc-800">
                       <code {...props}>{children}</code>
                     </pre>
                   </div>
@@ -76,21 +93,20 @@ const ChatMessage = memo(function ChatMessage({ msg }: { msg: Message }) {
             {msg.content}
           </ReactMarkdown>
         </div>
-
       </div>
     </div>
   );
 });
 
 // ==========================================
-// 2. THE TYPING INDICATOR
+// 2. MONOCHROMATIC TYPING INDICATOR
 // ==========================================
 const TypingIndicator = () => (
-  <div className="flex items-end gap-3 animate-in fade-in slide-in-from-bottom-2">
-    <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center shrink-0 bg-zinc-800 border border-zinc-700 shadow-sm">
-      <Bot className="w-4 h-4 sm:w-5 sm:h-5 text-zinc-400" />
+  <div className="flex items-start gap-3">
+    <div className="w-8 h-8 rounded-md flex items-center justify-center shrink-0 bg-zinc-900 border border-zinc-800">
+      <Bot className="w-4 h-4 text-zinc-500" />
     </div>
-    <div className="bg-zinc-800/80 backdrop-blur-sm px-5 py-4 rounded-2xl rounded-bl-sm border border-zinc-700/50 flex items-center gap-1.5">
+    <div className="bg-zinc-900/60 border border-zinc-800 px-4 py-3 rounded-md flex items-center gap-1.5">
       <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
       <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
       <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce" />
@@ -103,51 +119,35 @@ const TypingIndicator = () => (
 // ==========================================
 type ChatInterfaceProps = {
   activeProjectId: string | null;
-  onProjectCreated: (id: string) => void;
-  onMinimize?: () => void; 
-  onExpand?: () => void;
-  isExpanded?: boolean;
+  onProjectCreated?: (id: string) => void;
+  onStoryboardReady?: () => void;
 };
 
-export default function ChatInterface({ activeProjectId, onProjectCreated, onMinimize, onExpand, isExpanded }: ChatInterfaceProps) {
+export default function ChatInterface({ activeProjectId, onProjectCreated, onStoryboardReady }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [imageBase64, setImageBase64] = useState<string | null>(null);
-  const [storyboardReady, setStoryboardReady] = useState(false); 
   const [wantsToAdjust, setWantsToAdjust] = useState(false);
-  
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null); 
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const queryClient = useQueryClient();
 
   const { data: messages = [], isLoading: isProjectLoading } = useQuery<Message[]>({
     queryKey: ["chatMessages", activeProjectId || "draft"],
     queryFn: async () => {
-      if (!activeProjectId) return []; 
+      if (!activeProjectId) return [];
       const res = await fetch(`/api/projects/${activeProjectId}`);
       if (!res.ok) throw new Error("Failed to fetch project history");
       const data = await res.json();
       return data.chatHistory || [];
     },
-    staleTime: Infinity, 
+    staleTime: Infinity,
   });
 
   useEffect(() => {
     setWantsToAdjust(false);
   }, [messages.length]);
-
-  useEffect(() => {
-    if (!activeProjectId) {
-      setStoryboardReady(false);
-    } else {
-      const cachedProject: any = queryClient.getQueryData(["storyboardData", activeProjectId]);
-      if (cachedProject?.storyboard && cachedProject.storyboard.length > 0) {
-        setStoryboardReady(true);
-      } else {
-        setStoryboardReady(false);
-      }
-    }
-  }, [activeProjectId, queryClient]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -158,81 +158,81 @@ export default function ChatInterface({ activeProjectId, onProjectCreated, onMin
   };
 
   const mutation = useMutation({
-    mutationFn: async (newMsg: Message) => {
-      setStoryboardReady(false); 
+    mutationFn: async (userMessage: Message) => {
+      const groqApiKey = localStorage.getItem("director_groq_key") || "";
+      const preferredChatModel = "openai/gpt-oss-20b";
 
-     // 1. GRAB SETTINGS FROM BROWSER
-      const apiKey = localStorage.getItem("groq_api_key");
-      let chatModel = localStorage.getItem("groq_chat_model");
-      if (!chatModel || chatModel.includes("meta/") || chatModel.includes("llama")) {
-        chatModel = "openai/gpt-oss-20b";
-        localStorage.setItem("groq_chat_model", "openai/gpt-oss-20b");
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (groqApiKey) {
+        headers["Authorization"] = `Bearer ${groqApiKey}`;
       }
 
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (apiKey) {
-        headers["Authorization"] = `Bearer ${apiKey}`;
-      }
-
-      const response = await fetch("/api/chat", {
+      const res = await fetch("/api/chat", {
         method: "POST",
         headers,
-        body: JSON.stringify({ 
-          content: newMsg.content, 
-          imageBase64, 
+        body: JSON.stringify({
           projectId: activeProjectId,
-          chatModel: chatModel
+          content: userMessage.content,
+          imageBase64,
+          chatModel: preferredChatModel,
         }),
       });
 
-      if (response.status === 401) throw new Error("INVALID_KEY");
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || "API Request Failed");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        if (res.status === 401) {
+          throw new Error("MISSING_KEY");
+        }
+        throw new Error(errorData.error || "Failed to generate AI response");
       }
-      
-      return response.json();
+
+      return res.json();
     },
-    onMutate: async (newMsg) => {
+    onMutate: async (userMessage: Message) => {
       await queryClient.cancelQueries({ queryKey: ["chatMessages", activeProjectId || "draft"] });
-      const previousMessages = queryClient.getQueryData<Message[]>(["chatMessages", activeProjectId || "draft"]);
-      queryClient.setQueryData<Message[]>(["chatMessages", activeProjectId || "draft"], (old = []) => [...old, { ...newMsg, isOptimistic: true }]);
-      setImageBase64(null); 
+      const previousMessages = queryClient.getQueryData<Message[]>(["chatMessages", activeProjectId || "draft"]) || [];
+
+      queryClient.setQueryData<Message[]>(["chatMessages", activeProjectId || "draft"], [
+        ...previousMessages,
+        { ...userMessage, isOptimistic: true },
+      ]);
+
+      setImageBase64(null);
       return { previousMessages };
     },
     onSuccess: (data) => {
-      if (data.projectId && !activeProjectId) onProjectCreated(data.projectId);
-      if (data.storyboard && data.storyboard.length > 0) {
-        queryClient.setQueryData(["storyboardData", data.projectId], { storyboard: data.storyboard });
-        setStoryboardReady(true); 
+      if (!activeProjectId && data.projectId) {
+        onProjectCreated?.(data.projectId);
       }
-      queryClient.setQueryData<Message[]>(["chatMessages", activeProjectId || "draft"], (old = []) => {
-        const withoutOptimistic = old.filter((m) => !m.isOptimistic);
-        return [...withoutOptimistic, { timestamp: Date.now().toString(), role: "assistant", content: data.message.content }];
-      });
+
+      queryClient.setQueryData<Message[]>(["chatMessages", data.projectId || activeProjectId], (old = []) => [
+        ...old.filter((m) => !m.isOptimistic),
+        { ...data.message, timestamp: Date.now().toString() },
+      ]);
+
+      queryClient.invalidateQueries({ queryKey: ["storyboardData", data.projectId || activeProjectId] });
+
+      if (data.storyboard && data.storyboard.length > 0) {
+        onStoryboardReady?.();
+      }
     },
-    onError: (err: any, newMsg, context) => {
-      if (context?.previousMessages) queryClient.setQueryData(["chatMessages", activeProjectId || "draft"], context.previousMessages);
-      
-      // 4. HANDLE KEY ERRORS GRACEFULLY
+    onError: (err: any, _, context) => {
+      if (context?.previousMessages) {
+        queryClient.setQueryData(["chatMessages", activeProjectId || "draft"], context.previousMessages);
+      }
       if (err.message === "MISSING_KEY" || err.message.includes("Missing Groq API Key")) {
-        alert("Please click the Settings gear icon and enter your Groq API Key.");
-      } else if (err.message === "INVALID_KEY" || err.message.includes("Invalid Groq API Key")) {
-        alert("Your Groq API Key is invalid or expired. Please check your Settings.");
+        alert("Please open Settings and enter your Groq API Key.");
       } else {
         alert(err.message || "Failed to communicate with Director AI.");
       }
     },
   });
 
-  
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 180)}px`;
     }
   };
 
@@ -240,7 +240,7 @@ export default function ChatInterface({ activeProjectId, onProjectCreated, onMin
     e?.preventDefault();
     const finalMessage = directMessage || input;
     if (!finalMessage.trim() && !imageBase64) return;
-    
+
     mutation.mutate({ timestamp: Date.now().toString(), role: "user", content: finalMessage });
     setInput("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
@@ -248,159 +248,171 @@ export default function ChatInterface({ activeProjectId, onProjectCreated, onMin
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [messages.length, mutation.isPending, storyboardReady]);
+  }, [messages.length, mutation.isPending]);
 
-  // ==========================================
-  // DYNAMIC WORKFLOW DETECTOR
-  // ==========================================
+  // Workflow detection
   const lastMsgText = messages[messages.length - 1]?.content.toLowerCase() || "";
-  
-  const isSatisfactoryQuestion = !mutation.isPending && messages[messages.length - 1]?.role === "assistant" && lastMsgText.includes("satisfactory");
-  const isReadyQuestion = !mutation.isPending && messages[messages.length - 1]?.role === "assistant" && lastMsgText.includes("ready");
-  
-  // NEW: Detects when the AI asks for an image or offers to decide the aesthetic
-  const isImageRequestQuestion = !mutation.isPending && messages[messages.length - 1]?.role === "assistant" && lastMsgText.includes("you decide");
-  
-  // Combine all action states
+  const isSatisfactoryQuestion =
+    !mutation.isPending && messages[messages.length - 1]?.role === "assistant" && lastMsgText.includes("satisfactory");
+  const isReadyQuestion =
+    !mutation.isPending && messages[messages.length - 1]?.role === "assistant" && lastMsgText.includes("ready");
+  const isImageRequestQuestion =
+    !mutation.isPending && messages[messages.length - 1]?.role === "assistant" && lastMsgText.includes("you decide");
   const isActionRequired = isSatisfactoryQuestion || isReadyQuestion || isImageRequestQuestion;
 
+  const hasContent = Boolean(input.trim() || imageBase64);
+
   if (isProjectLoading) {
-    return <div className="flex flex-col h-full bg-zinc-950 border border-zinc-800/80 rounded-2xl p-6 shadow-2xl relative overflow-hidden">Loading...</div>
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-zinc-500 text-xs font-mono">
+        <Loader2 className="w-5 h-5 animate-spin mb-2" />
+        <span>Loading screenplay...</span>
+      </div>
+    );
   }
 
   return (
-    <div className="flex flex-col h-full bg-[#09090b] text-zinc-50 border border-zinc-800/80 rounded-2xl overflow-hidden shadow-2xl relative">
-
-      {onExpand && (
-        <button 
-          onClick={onExpand}
-          className="absolute top-4 right-4 z-20 p-2 bg-zinc-900/80 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-zinc-700/50 rounded-lg shadow-sm backdrop-blur-md transition-all"
-          title={isExpanded ? "Split View" : "Full Screen Chat"}
-        >
-          {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
-        </button>
-      )}
-      
-      {/* Messages Window */}
-      <div className="flex-1 overflow-y-auto p-3 sm:p-5 space-y-5 sm:space-y-6 custom-scrollbar scroll-smooth relative pb-10">
-        
+    <div className="flex flex-col h-full w-full bg-zinc-950 text-zinc-100 relative">
+      {/* Messages Scroll Area */}
+      <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5 custom-scrollbar scroll-smooth">
         {messages.length === 0 && !mutation.isPending && (
-          <div className="h-full flex flex-col items-center justify-center text-zinc-500 animate-in fade-in duration-700">
-            <div className="w-16 h-16 bg-zinc-900 rounded-full flex items-center justify-center mb-6 shadow-inner border border-zinc-800">
-              <Bot className="w-8 h-8 text-zinc-400" />
+          <div className="h-full min-h-[350px] flex flex-col items-center justify-center text-center p-6">
+            <div className="w-12 h-12 rounded-md bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-300 mb-4 shadow-sm">
+              <Bot className="w-6 h-6 stroke-[1.5]" />
             </div>
-            <h3 className="text-lg font-semibold text-zinc-300 mb-2">Director's Terminal</h3>
-            <p className="text-sm text-center max-w-xs text-zinc-500">I will guide you step-by-step to create your storyboard. What is the concept for your video?</p>
-          </div>
-        )}
-        
-        {messages.map((msg, index) => <ChatMessage key={msg._id || msg.timestamp || index} msg={msg} />)}
-        {mutation.isPending && <TypingIndicator />}
-        
-        {storyboardReady && !mutation.isPending && (
-          <div className="flex justify-center mt-6 animate-in slide-in-from-bottom-4 fade-in duration-500">
-            <button 
-              onClick={onMinimize}
-              className="flex items-center gap-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white px-6 py-3 rounded-xl shadow-[0_0_30px_-5px_rgba(99,102,241,0.5)] transition-all font-bold group"
-            >
-              <LayoutTemplate className="w-5 h-5" />
-              Minimize Chat & View Canvas
-              <ChevronRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-            </button>
+            <h2 className="text-base font-semibold text-zinc-100 tracking-tight mb-1">
+              Writer&apos;s Room
+            </h2>
+            <p className="text-xs text-zinc-400 max-w-sm leading-relaxed">
+              Define your concept, characters, and sequence flow. When the story is locked, proceed to the node compositor canvas.
+            </p>
           </div>
         )}
 
+        {messages.map((msg, index) => (
+          <ChatMessage key={msg._id || msg.timestamp || index} msg={msg} />
+        ))}
+
+        {mutation.isPending && <TypingIndicator />}
         <div ref={messagesEndRef} className="h-4 w-full" />
       </div>
 
-      {/* Input Area */}
-      <div className="p-3 sm:p-4 bg-zinc-950/95 backdrop-blur-xl border-t border-zinc-800/80 min-h-[80px] flex flex-col justify-end transition-all duration-300">
-        
-        {isActionRequired && !wantsToAdjust && (
-          <div className="flex flex-col gap-3 w-full animate-in slide-in-from-bottom-2 fade-in">
-            <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider px-1">Action Required</p>
-            <div className="flex flex-col sm:flex-row gap-2 w-full">
-              
-              {/* PRIMARY ACTION BUTTON */}
-              <button 
+      {/* Input Area: Strictly border-t border-zinc-800 */}
+      <div className="p-4 bg-zinc-950 border-t border-zinc-800">
+        {isActionRequired && !wantsToAdjust ? (
+          <div className="flex flex-col gap-2.5 mb-3">
+            <p className="text-[11px] font-mono uppercase tracking-wider text-zinc-500">
+              Director Action Required
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <button
                 onClick={() => {
                   if (isReadyQuestion) handleSend(undefined, "Yes, I am ready. Generate the final storyboard.");
                   else if (isSatisfactoryQuestion) handleSend(undefined, "Yes, the script is satisfactory. Proceed.");
                   else if (isImageRequestQuestion) handleSend(undefined, "You decide. Establish the aesthetic for us.");
                 }}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-bold shadow-lg transition-all"
+                className="flex-1 h-9 px-4 rounded-md bg-zinc-100 text-zinc-950 hover:bg-white text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
               >
-                {isImageRequestQuestion ? <Sparkles className="w-4 h-4" /> : <Check className="w-4 h-4" />} 
-                {isReadyQuestion ? "Yes, generate storyboard" : isSatisfactoryQuestion ? "Yes, script is perfect" : "You decide the aesthetic"}
+                {isImageRequestQuestion ? <Sparkles className="w-3.5 h-3.5" /> : <Check className="w-3.5 h-3.5" />}
+                <span>
+                  {isReadyQuestion
+                    ? "Generate Storyboard"
+                    : isSatisfactoryQuestion
+                    ? "Script is Satisfactory"
+                    : "Establish Aesthetic"}
+                </span>
               </button>
-              
-              {/* SECONDARY ACTION BUTTON */}
-              <button 
+
+              <button
                 onClick={() => {
                   setWantsToAdjust(true);
                   setTimeout(() => {
-                    // If asking for an image, automatically open the user's file picker!
-                    if (isImageRequestQuestion) fileInputRef.current?.click(); 
+                    if (isImageRequestQuestion) fileInputRef.current?.click();
                     else textareaRef.current?.focus();
                   }, 50);
                 }}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 rounded-xl text-sm font-medium transition-all"
+                className="flex-1 h-9 px-4 rounded-md bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 text-xs font-medium flex items-center justify-center gap-2 transition-colors"
               >
-                {isImageRequestQuestion ? <ImageIcon className="w-4 h-4" /> : <Edit3 className="w-4 h-4" />} 
-                {isImageRequestQuestion ? "I'll upload an image" : "No, let's adjust"}
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>Adjust Parameters</span>
               </button>
-
             </div>
           </div>
-        )}
+        ) : null}
 
-        {(!isActionRequired || wantsToAdjust) && (
-          <div className="w-full animate-in fade-in duration-300">
-            {imageBase64 && (
-              <div className="mb-3 relative inline-block animate-in zoom-in-95 duration-200">
-                <img src={imageBase64} alt="Upload preview" className="h-16 sm:h-20 rounded-lg border-2 border-zinc-700 object-cover shadow-lg" />
-                <button onClick={() => setImageBase64(null)} className="absolute -top-2 -right-2 bg-zinc-800 border border-zinc-600 rounded-full p-1 hover:bg-zinc-700 transition-colors shadow-md">
-                  <X className="w-3 h-3 sm:w-4 sm:h-4 text-zinc-300" />
-                </button>
-              </div>
-            )}
-
-            <form onSubmit={handleSend} className="relative flex items-end bg-zinc-900 border border-zinc-700/60 rounded-[20px] px-2 py-2 shadow-inner focus-within:border-indigo-500/70 focus-within:ring-2 focus-within:ring-indigo-500/20 transition-all duration-300">
-              
-              <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageUpload} className="hidden" />
-              
-              <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 sm:p-2.5 text-zinc-400 hover:text-indigo-400 hover:bg-zinc-800 rounded-full transition-colors shrink-0 mb-0.5">
-                <ImageIcon className="w-5 h-5" />
-              </button>
-              
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={handleTextareaChange}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend(e);
-                  }
-                }}
-                placeholder="Type your concept or reply..."
-                className="flex-1 bg-transparent border-none outline-none px-2 sm:px-3 py-2.5 sm:py-3 text-[15px] text-zinc-100 placeholder:text-zinc-500 resize-none min-h-[44px] max-h-[200px] overflow-y-auto custom-scrollbar"
-                rows={1}
+        {/* Text Input Form */}
+        <div className="relative">
+          {imageBase64 && (
+            <div className="mb-2 relative inline-block">
+              <img
+                src={imageBase64}
+                alt="Upload preview"
+                className="h-16 w-16 rounded-md border border-zinc-700 object-cover"
               />
-              
-              <button 
-                type="submit" 
-                disabled={(!input.trim() && !imageBase64) || mutation.isPending} 
-                className="p-2 sm:p-2.5 bg-indigo-600 text-white rounded-full hover:bg-indigo-500 disabled:opacity-50 disabled:hover:bg-indigo-600 transition-all shrink-0 mb-0.5 shadow-md"
+              <button
+                onClick={() => setImageBase64(null)}
+                className="absolute -top-1.5 -right-1.5 bg-zinc-900 border border-zinc-700 rounded-full p-0.5 text-zinc-300 hover:text-white transition-colors"
               >
-                <Send className="w-4 h-4 sm:w-5 sm:h-5 ml-0.5" />
+                <X className="w-3 h-3" />
               </button>
-            </form>
-            <div className="text-center mt-2">
-                <span className="text-[10px] text-zinc-500 font-medium tracking-wide">Press Enter to send, Shift + Enter for new line</span>
             </div>
+          )}
+
+          <form
+            onSubmit={handleSend}
+            className="flex items-end bg-zinc-900 border border-zinc-800 focus-within:border-zinc-700 rounded-md p-1.5 transition-colors"
+          >
+            <input
+              type="file"
+              accept="image/*"
+              ref={fileInputRef}
+              onChange={handleImageUpload}
+              className="hidden"
+            />
+
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              title="Attach visual anchor image"
+              className="p-2 text-zinc-400 hover:text-zinc-200 transition-colors shrink-0"
+            >
+              <ImageIcon className="w-4 h-4" />
+            </button>
+
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={handleTextareaChange}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend(e);
+                }
+              }}
+              placeholder="Direct the sequence, describe scenes or request changes..."
+              className="flex-1 bg-transparent border-none outline-none px-2 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 resize-none min-h-[36px] max-h-[160px] custom-scrollbar"
+              rows={1}
+            />
+
+            {/* Submit Button: Stark white inversion when active, subtle ghost when disabled */}
+            <button
+              type="submit"
+              disabled={!hasContent || mutation.isPending}
+              className={`h-8 w-8 rounded-md flex items-center justify-center shrink-0 transition-colors ${
+                hasContent && !mutation.isPending
+                  ? "bg-zinc-100 text-zinc-950 hover:bg-white"
+                  : "text-zinc-600 bg-transparent cursor-not-allowed"
+              }`}
+            >
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          </form>
+
+          <div className="flex items-center justify-between mt-2 px-1 text-[10px] text-zinc-500 font-mono">
+            <span>Press Enter to send, Shift + Enter for newline</span>
+            <span>Groq 20B Engine</span>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

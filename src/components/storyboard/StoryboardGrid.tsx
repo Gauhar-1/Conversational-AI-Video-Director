@@ -1,372 +1,695 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { IScene } from "@/models/Project";
-import { ReactFlow, Controls, Background, useNodesState, useEdgesState, Node, Edge, MarkerType } from '@xyflow/react';
-import '@xyflow/react/dist/style.css'; 
+import { useState, useMemo, useRef, useCallback } from "react";
+import { 
+  ReactFlow, 
+  Controls, 
+  Background, 
+  Node, 
+  Edge 
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css"; 
 
-import { Maximize2, Minimize2, Play, Download, X, Film, Loader2 } from "lucide-react"; 
+import { 
+  Play, Download, X, Film, Loader2, 
+  User, Mountain, Smartphone, Monitor,
+  Network, LayoutList, SlidersHorizontal
+} from "lucide-react"; 
 
+import { SceneMacroNode } from "./nodes/SceneMacroNode";
 import { FrameNode } from "./nodes/FrameNode";
 import { VideoNode } from "./nodes/VideoNode";
 import { CharacterNode } from "./nodes/CharacterNode";
 import { BackgroundNode } from "./nodes/BackgroundNode";
+import NodeInspector from "./NodeInspector";
 import { useStoryboard } from "./hooks/useStoryBoard";
-import { DIRECTOR_MODELS } from "@/config/modelRegistry";
+import { compileFCPXML, downloadFCPXML } from "@/lib/fcpxml";
+import { CameraAngle, ISceneDoc } from "@/models/Project";
 
-export default function StoryboardCanvas({ activeProjectId, isExpanded, onExpand }: { activeProjectId: string | null, isExpanded: boolean, onExpand: (expanded: boolean) => void }) {
+// Static node types defined outside component to prevent React Flow re-registration loops
+const NODE_TYPES = { 
+  sceneMacroNode: SceneMacroNode,
+  frameNode: FrameNode, 
+  videoNode: VideoNode,
+  characterNode: CharacterNode,
+  backgroundNode: BackgroundNode
+};
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+type StoryboardCanvasProps = {
+  activeProjectId: string | null;
+  isExpanded?: boolean;
+  onExpand?: (expanded: boolean) => void;
+};
 
-  // --- NEW STATES FOR PREVIEW & EXPORT ---
+export default function StoryboardCanvas({ 
+  activeProjectId, 
+  isExpanded = true, 
+  onExpand 
+}: StoryboardCanvasProps) {
+  // View mode: "graph" (Cluster multi-node) vs "timeline" (Macro linear sequence)
+  const [viewMode, setViewMode] = useState<"graph" | "timeline">("graph");
+
+  // Preview & Export States
   const [showPreview, setShowPreview] = useState(false);
   const [currentPlayIndex, setCurrentPlayIndex] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
-  const [activeEdgeRules, setActiveEdgeRules] = useState<{ sceneNumber: number, requiredNodes: string[] } | null>(null);
 
-  const nodeTypes = useMemo(() => ({ 
-    frameNode: FrameNode, 
-    videoNode: VideoNode,
-    characterNode: CharacterNode,
-    backgroundNode: BackgroundNode
-  }), []);
-
-  const {
+  const { 
+    scenes, 
+    globalVault, 
     storyboard,
-    isLoading,
+    enrichingScenes, 
+    lastTokenResult,
+    enrichSceneDelta,
+    updateScene,
+    updateVault,
+    generateSceneFrame,
+    generateSceneCharacter,
+    generateSceneBackground,
+    generateSceneVideo,
     generatedFrames,
-    generatedVideos,
-    generatedBgs,
-    assetErrors,
     generatedChars,
-    generateVideo,
-    generatingAssets,
-    saveOverrides,
-    generateImage
+    generatedBgs,
+    generatedVideos,
+    generatingAssets
   } = useStoryboard(activeProjectId);
 
-  const globalCharacters = useMemo(() => {
-    const map = new Map();
-    storyboard.forEach(scene => {
-      scene.characters?.forEach((c: any) => {
-        if (c.generated_url && !map.has(c.name)) {
-          map.set(c.name, c);
-        }
-      });
-    });
-    return Array.from(map.values());
-  }, [storyboard]);
+  // Normalize scenes: Support projects saved under scenes or storyboard schema
+  const effectiveScenes: ISceneDoc[] = useMemo(() => {
+    if (scenes && scenes.length > 0) return scenes;
+    if (storyboard && storyboard.length > 0) {
+      const angles: CameraAngle[] = ["CAM_A_CENTER", "CAM_B_45_CLOSE", "CAM_C_OTS"];
+      return storyboard.map((s: any, idx: number) => ({
+        sceneId: `scene-${s.scene_number || idx + 1}`,
+        order: s.scene_number || idx + 1,
+        duration: 10,
+        cameraAngle: angles[idx % 3],
+        rawDelta: s.action || s.location || `Scene ${idx + 1} action`,
+        imagePrompt: s.frame_prompt || `Scene ${idx + 1} composition`,
+        motionPrompt: s.video_prompt || `Scene ${idx + 1} motion physics`,
+        firstFrameUrl: s.frame_url || "",
+        lastFrameUrl: "",
+        videoUrl: s.video_url || "",
+        status: "ready" as const,
+      }));
+    }
+    return [];
+  }, [scenes, storyboard]);
 
-  // --- PREVIEW & EXPORT LOGIC ---
-  
-  // 1. Gather all valid videos in chronological order
+  // Selection & Inspector state
+  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
+  const [isInspectorOpen, setIsInspectorOpen] = useState(false);
+
+  // Derive selectedScene deterministically without state syncing loops
+  const selectedScene = useMemo(() => {
+    if (!selectedSceneId && effectiveScenes.length > 0) {
+      return effectiveScenes[0];
+    }
+    if (!selectedSceneId) return null;
+    return effectiveScenes.find((s) => s.sceneId === selectedSceneId) || effectiveScenes[0] || null;
+  }, [effectiveScenes, selectedSceneId]);
+
+  // Derive matching storyboard item for rich character and environment prompts
+  const selectedStoryboardItem = useMemo(() => {
+    if (!selectedScene) return null;
+    return storyboard.find((sb: any) => sb.scene_number === selectedScene.order) || null;
+  }, [storyboard, selectedScene]);
+
+  // Handle selecting a scene node
+  const handleSelectScene = useCallback((scene: ISceneDoc) => {
+    setSelectedSceneId(scene.sceneId);
+    setIsInspectorOpen(true);
+  }, []);
+
+  // Handle changing angle on node
+  const handleUpdateAngle = useCallback((sceneId: string, angle: CameraAngle) => {
+    const sc = effectiveScenes.find((s) => s.sceneId === sceneId);
+    if (sc) {
+      enrichSceneDelta(sceneId, sc.rawDelta, angle);
+    }
+  }, [effectiveScenes, enrichSceneDelta]);
+
+  // Gather all valid videos in chronological order
   const compiledVideos = useMemo(() => {
-    return storyboard
-      .map(scene => generatedVideos[scene.scene_number] || scene.video_url)
-      .filter(url => url !== null && url !== undefined); // Only keep completed scenes
-  }, [storyboard, generatedVideos]);
+    return effectiveScenes
+      .map(s => s.videoUrl)
+      .filter((url): url is string => Boolean(url && url.trim() !== ""));
+  }, [effectiveScenes]);
 
-  // 2. Sequential Downloader
-  const handleExport = async () => {
-    if (compiledVideos.length === 0) return alert("No videos generated yet!");
-    setIsExporting(true);
+  // FCPXML Compiler & Downloader
+  const handleExportFCPXML = () => {
+    if (effectiveScenes.length === 0) {
+      alert("No scenes available to export. Create scenes in Writer's Room first.");
+      return;
+    }
 
     try {
-      for (let i = 0; i < compiledVideos.length; i++) {
-        const url = compiledVideos[i];
-        const response = await fetch(url);
-        const blob = await response.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        
-        const a = document.createElement("a");
-        a.href = blobUrl;
-        a.download = `Project_${activeProjectId}_Scene_${i + 1}.mp4`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(blobUrl);
-        
-        // Slight delay to prevent browser from blocking multiple downloads
-        await new Promise(res => setTimeout(res, 800)); 
-      }
-    } catch (error) {
-      console.error("Export failed:", error);
-      alert("Failed to download some clips.");
+      setIsExporting(true);
+      setExportNotice("Compiling FCPXML...");
+      const projectName = `Director_AI_Sequence_${new Date().toISOString().slice(0, 10)}`;
+      const fcpxmlString = compileFCPXML({ scenes: effectiveScenes, projectTitle: projectName });
+      downloadFCPXML(fcpxmlString, `${projectName}.fcpxml`);
+
+      setExportNotice("Exported (.fcpxml)");
+      setTimeout(() => setExportNotice(null), 3000);
+    } catch (err: any) {
+      console.error("FCPXML Export Failed:", err);
+      alert("Failed to export FCPXML: " + err.message);
     } finally {
       setIsExporting(false);
     }
   };
 
+  const handleDownloadClips = async () => {
+    if (compiledVideos.length === 0) return;
+    for (let i = 0; i < compiledVideos.length; i++) {
+      const a = document.createElement("a");
+      a.href = compiledVideos[i];
+      a.download = `Scene_${i + 1}_Clip.mp4`;
+      a.target = "_blank";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      await new Promise(r => setTimeout(r, 600));
+    }
+  };
 
-  // --- NODE & EDGE CONSTRUCTION ---
-  useEffect(() => {
-    if (storyboard.length === 0) return;
+  // ---------------------------------------------------------------------------
+  // DERIVE NODES DETERMINISTICALLY WITH useMemo
+  // ---------------------------------------------------------------------------
+  const nodes: Node[] = useMemo(() => {
+    if (!effectiveScenes || effectiveScenes.length === 0) return [];
 
-    const newNodes: Node[] = [];
-    const newEdges: Edge[] = [];
+    // VIEW MODE 1: CLUSTER GRAPH VIEW (FrameNode, CharacterNode, BackgroundNode, VideoNode)
+    if (viewMode === "graph") {
+      const sceneSpacing = 1100;
+      const startX = 60;
+      const centerY = 360;
 
-    const sceneWidth = 1200; 
-    const videoOffsetX = 600; 
-    const yCenter = 400; 
+      const clusterNodes: Node[] = [];
 
-    storyboard.forEach((scene, index) => {
-      const baseX = index * sceneWidth; 
-      const characters = scene.characters?.length ? scene.characters : [{ _id: 'char-1', name: 'Main Subject', appearance_prompt: 'Character ref' }];
-      const videoNodeId = `video-${scene.scene_number}`;
+      effectiveScenes.forEach((scene, index) => {
+        const baseX = startX + index * sceneSpacing;
+        const sbItem = storyboard.find((sb: any) => sb.scene_number === scene.order);
 
-     // Check if THIS scene is currently in Edit Mode
-      const isEditingThisScene = activeEdgeRules?.sceneNumber === scene.scene_number;
-      const requiredNodes = activeEdgeRules?.requiredNodes || [];
+        const startNodeId = `start-${scene.order}`;
+        const charNodeId = `char-char-1-${scene.order}`;
+        const bgNodeId = `bg-${scene.order}`;
+        const videoNodeId = `video-${scene.order}`;
 
-      // Dynamic Edge Styler
-      const getEdgeStyle = (nodeType: string, baseColor: string) => {
-        // If no scene is being edited, return standard neutral edges
-        if (!activeEdgeRules) return { stroke: baseColor, strokeWidth: 2, opacity: 0.6, filter: 'none' };
-        
-        // If a scene IS being edited, but it's not THIS one, dim it out to focus the user
-        if (!isEditingThisScene) return { stroke: baseColor, strokeWidth: 1, opacity: 0.1, filter: 'none' };
-
-        // If this scene IS being edited, apply Glow/Dim based on the model's requirements
-        const isRequired = requiredNodes.includes(nodeType);
-        return isRequired 
-          ? { stroke: '#fff', strokeWidth: 4, opacity: 1, filter: `drop-shadow(0 0 10px ${baseColor})` } // GLOW ACTIVE
-          : { stroke: baseColor, strokeWidth: 1, opacity: 0.1, filter: 'none' }; // DIM INACTIVE
-      };
-
-      // 1. LEFT: Start Frame Node
-      const startNodeId = `start-${scene.scene_number}`;
-      newNodes.push({
-        id: startNodeId,
-        type: 'frameNode',
-        position: { x: baseX - 100, y: yCenter },
-        data: { 
-          scene, 
-          prompt: scene.frame_prompt,
-          imageUrl: generatedFrames[startNodeId] || scene.frame_url,
-          isGenerating: !!generatingAssets[startNodeId],
-          error: assetErrors[startNodeId],
-          onGenerate: (localPrompt: string, localRef: string | null) => generateImage(
-            startNodeId, '/api/generate-frame', { prompt: localPrompt, reference_image: localRef, sceneNumber: scene.scene_number }
-          ),
-          onSaveEdit: saveOverrides
-        }
-      });
-      newEdges.push({ id: `e-${startNodeId}-v`, source: startNodeId, sourceHandle: 'right', target: videoNodeId, targetHandle: 'left', type: 'smoothstep', animated: true, style: getEdgeStyle('startFrame', '#6366f1'), });
-
-      const nodeWidth = 288; 
-      const gap = 100;
-      const totalCharWidth = (characters.length * nodeWidth) + ((characters.length - 1) * gap);
-      const startX = baseX + videoOffsetX - (totalCharWidth / 2) + (nodeWidth / 2);
-
-      characters.forEach((char: any, charIndex: number) => {
-        const charNodeId = `char-${char._id}-${scene.scene_number}`;
-        
-        newNodes.push({
-          id: charNodeId,
-          type: 'characterNode',
-          position: { x: startX + (charIndex * (nodeWidth + gap)) - 400, y: yCenter - 650 },
-          data: { 
-            scene, character: char, globalCharacters, 
-            imageUrl: generatedChars[charNodeId] || char.generated_url,
-            isGenerating: !!generatingAssets[charNodeId],
-            error: assetErrors[charNodeId],
-            onGenerate: (localPrompt: string, localRef: string | null) => generateImage(
-              charNodeId, '/api/generate-character', { prompt: localPrompt, reference_image: localRef, charId: char._id, sceneNumber: scene.scene_number }
-            ),
-            onSaveEdit: saveOverrides
-          }
-        });
-
-        newEdges.push({ id: `e-${charNodeId}-v`, source: charNodeId, sourceHandle: 'bottom', target: videoNodeId, targetHandle: 'top', type: 'smoothstep', animated: true, style: getEdgeStyle('character', '#ec4899') });
-      });
-
-      // 3. BOTTOM: Background Node
-      const bgNodeId = `bg-${scene.scene_number}`;
-      newNodes.push({
-        id: bgNodeId,
-        type: 'backgroundNode',
-        position: { x: baseX + videoOffsetX / 2, y: yCenter + 600 },
-        data: { 
-          scene, prompt: scene.environment_prompt,
-          imageUrl: generatedBgs[bgNodeId] || scene.background_url,
-          isGenerating: !!generatingAssets[bgNodeId],
-          error: assetErrors[bgNodeId],
-          onGenerate: (localPrompt: string, localRef: string | null) => generateImage(
-            bgNodeId, '/api/generate-background', { prompt: localPrompt, reference_image: localRef, sceneNumber: scene.scene_number }
-          ),
-          onSaveEdit: saveOverrides
-        }
-      });
-      newEdges.push({ id: `e-${bgNodeId}-v`, source: bgNodeId, sourceHandle: 'top', target: videoNodeId, targetHandle: 'bottom', type: 'smoothstep', animated: true, style: getEdgeStyle('background', '#fbbf24') });
-
-      // 4. CENTER: Video Node
-      newNodes.push({
-        id: videoNodeId,
-        type: 'videoNode',
-        position: { x: baseX + videoOffsetX , y: yCenter  },
-        data: { 
-          scene, prompt: scene.video_prompt,
-          setActiveEdgeRules,
-          videoUrl: generatedVideos[scene.scene_number] || scene.video_url,
-          isGenerating: !!generatingAssets[videoNodeId],
-          error: assetErrors[videoNodeId],
-          onGenerate: (localPrompt: string, selectedModel: string) => {
-            // 1. Gather all currently generated or saved assets for this scene
-            const startFrame = generatedFrames[startNodeId] || scene.frame_url;
-            const bgFrame = generatedBgs[bgNodeId] || scene.background_url;
-            
-            // Map through characters to get all active character URLs
-            const charUrls = characters.map((c: any) => {
-              const charId = `char-${c._id}-${scene.scene_number}`;
-              return generatedChars[charId] || c.generated_url;
-            }).filter(Boolean); // Remove nulls/undefined
-
-            // 2. Build the advancedInputs payload
-            const advancedPayload: any = {};
-            if (startFrame) advancedPayload.startFrameUrl = startFrame;
-            if (bgFrame) advancedPayload.backgroundReferenceUrl = bgFrame;
-            if (charUrls.length > 0) advancedPayload.characterReferenceUrls = charUrls;
-
-            // 3. Fire the hook
-            generateVideo(scene.scene_number, localPrompt, selectedModel, advancedPayload);
+        // 1. LEFT: Start Frame Node (Keyframe)
+        const frameImg = generatedFrames[startNodeId] || scene.firstFrameUrl || sbItem?.frame_url || "";
+        clusterNodes.push({
+          id: startNodeId,
+          type: "frameNode",
+          position: { x: baseX, y: centerY },
+          data: {
+            scene: { ...scene, scene_number: scene.order, frame_prompt: scene.imagePrompt || sbItem?.frame_prompt },
+            imageUrl: frameImg,
+            isGenerating: Boolean(generatingAssets[startNodeId] || generatingAssets[scene.sceneId]),
+            onGenerate: (localPrompt: string) => generateSceneFrame(scene.sceneId, localPrompt),
+            onSaveEdit: (prompt: string, _ref: string | null, uploadUrl?: string) => {
+              updateScene(scene.sceneId, { 
+                imagePrompt: prompt, 
+                firstFrameUrl: uploadUrl || scene.firstFrameUrl 
+              });
+            },
+            onSelect: () => handleSelectScene(scene),
           },
-          onSaveEdit: saveOverrides
+          selected: selectedSceneId === scene.sceneId,
+        });
+
+        // 2. TOP: Character Node
+        const charData = sbItem?.characters?.[0] || {
+          _id: "char-1",
+          name: "Main Subject",
+          appearance_prompt: globalVault?.characterAnchor?.description || "Lead protagonist with cinematic detailing",
+        };
+        const charImg = generatedChars[charNodeId] || charData.generated_url || globalVault?.characterAnchor?.imageUrl || "";
+
+        clusterNodes.push({
+          id: charNodeId,
+          type: "characterNode",
+          position: { x: baseX + 340, y: centerY - 320 },
+          data: {
+            scene: { ...scene, scene_number: scene.order },
+            character: charData,
+            globalCharacters: [],
+            imageUrl: charImg,
+            isGenerating: Boolean(generatingAssets[charNodeId]),
+            onGenerate: (localPrompt: string) => generateSceneCharacter(scene.order, "char-1", localPrompt),
+            onSaveEdit: (_sceneNum: number, _type: string, _id: string, prompt: string, _ref: string | null, uploadUrl?: string) => {
+              updateVault({
+                characterAnchor: {
+                  ...globalVault?.characterAnchor,
+                  description: prompt,
+                  imageUrl: uploadUrl || globalVault?.characterAnchor?.imageUrl,
+                },
+              });
+            },
+            onSelect: () => handleSelectScene(scene),
+          },
+          selected: selectedSceneId === scene.sceneId,
+        });
+
+        // 3. BOTTOM: Background Node
+        const bgImg = generatedBgs[bgNodeId] || sbItem?.background_url || globalVault?.environmentAnchor?.imageUrl || "";
+        const bgPrompt = sbItem?.environment_prompt || globalVault?.environmentAnchor?.description || "Cinematic environment atmosphere";
+
+        clusterNodes.push({
+          id: bgNodeId,
+          type: "backgroundNode",
+          position: { x: baseX + 340, y: centerY + 280 },
+          data: {
+            scene: { ...scene, scene_number: scene.order },
+            prompt: bgPrompt,
+            imageUrl: bgImg,
+            isGenerating: Boolean(generatingAssets[bgNodeId]),
+            onGenerate: (localPrompt: string, refImage?: string | null) => 
+              generateSceneBackground(scene.order, localPrompt, refImage || undefined),
+            onSaveEdit: (_sceneNum: number, _type: string, _id: string, prompt: string, _ref: string | null, uploadUrl?: string) => {
+              updateVault({
+                environmentAnchor: {
+                  ...globalVault?.environmentAnchor,
+                  description: prompt,
+                  imageUrl: uploadUrl || globalVault?.environmentAnchor?.imageUrl,
+                },
+              });
+            },
+            onSelect: () => handleSelectScene(scene),
+          },
+          selected: selectedSceneId === scene.sceneId,
+        });
+
+        // 4. CENTER: Video Node
+        const videoUrl = generatedVideos[scene.order] || scene.videoUrl || sbItem?.video_url || "";
+        clusterNodes.push({
+          id: videoNodeId,
+          type: "videoNode",
+          position: { x: baseX + 340, y: centerY },
+          data: {
+            scene: { ...scene, scene_number: scene.order, video_prompt: scene.motionPrompt || sbItem?.video_prompt },
+            prompt: scene.motionPrompt || sbItem?.video_prompt || scene.rawDelta,
+            videoUrl: videoUrl,
+            isGenerating: Boolean(generatingAssets[scene.sceneId]),
+            onGenerate: (localPrompt: string, selectedModel: string) => {
+              generateSceneVideo(scene.sceneId, localPrompt, selectedModel, {
+                startFrameUrl: frameImg,
+                characterReferenceUrls: charImg ? [charImg] : [],
+                backgroundReferenceUrl: bgImg || undefined,
+              });
+            },
+            onSaveEdit: (_sceneNum: number, _type: string, _id: string, prompt: string, uploadUrl?: string) => {
+              updateScene(scene.sceneId, {
+                motionPrompt: prompt,
+                videoUrl: uploadUrl || scene.videoUrl,
+              });
+            },
+            onSelect: () => handleSelectScene(scene),
+          },
+          selected: selectedSceneId === scene.sceneId,
+        });
+      });
+
+      return clusterNodes;
+    }
+
+    // VIEW MODE 2: TIMELINE MACRO SEQUENCE VIEW (SceneMacroNode)
+    const HORIZONTAL_SPACING = 340;
+    const START_X = 80;
+    const START_Y = 160;
+
+    return effectiveScenes.map((scene, index) => {
+      const nodeX = START_X + index * HORIZONTAL_SPACING;
+      const nodeY = START_Y;
+      const sbItem = storyboard.find((sb: any) => sb.scene_number === scene.order);
+
+      return {
+        id: scene.sceneId,
+        type: "sceneMacroNode",
+        position: { x: nodeX, y: nodeY },
+        data: {
+          scene,
+          storyboardItem: sbItem,
+          globalVault,
+          onSelect: handleSelectScene,
+          onUpdateAngle: handleUpdateAngle,
+          onEnrichDelta: enrichSceneDelta,
+          isEnriching: Boolean(enrichingScenes[scene.sceneId]),
+        },
+        selected: selectedSceneId === scene.sceneId,
+      };
+    });
+  }, [
+    viewMode,
+    effectiveScenes,
+    storyboard,
+    globalVault,
+    selectedSceneId,
+    enrichingScenes,
+    generatingAssets,
+    generatedFrames,
+    generatedChars,
+    generatedBgs,
+    generatedVideos,
+    handleSelectScene,
+    handleUpdateAngle,
+    enrichSceneDelta,
+    generateSceneFrame,
+    generateSceneCharacter,
+    generateSceneBackground,
+    generateSceneVideo,
+    updateScene,
+    updateVault,
+  ]);
+
+  // ---------------------------------------------------------------------------
+  // DERIVE EDGES DETERMINISTICALLY WITH useMemo
+  // ---------------------------------------------------------------------------
+  const edges: Edge[] = useMemo(() => {
+    if (!effectiveScenes || effectiveScenes.length === 0) return [];
+
+    // VIEW MODE 1: CLUSTER GRAPH EDGES
+    if (viewMode === "graph") {
+      const clusterEdges: Edge[] = [];
+
+      effectiveScenes.forEach((scene, index) => {
+        const startNodeId = `start-${scene.order}`;
+        const charNodeId = `char-char-1-${scene.order}`;
+        const bgNodeId = `bg-${scene.order}`;
+        const videoNodeId = `video-${scene.order}`;
+
+        // 1. Frame -> Video (horizontal input)
+        clusterEdges.push({
+          id: `e-${startNodeId}-${videoNodeId}`,
+          source: startNodeId,
+          target: videoNodeId,
+          sourceHandle: "right",
+          targetHandle: "left",
+          type: "smoothstep",
+          animated: true,
+          style: { stroke: "#a1a1aa", strokeWidth: 2 },
+        });
+
+        // 2. Character -> Video (top-down input)
+        clusterEdges.push({
+          id: `e-${charNodeId}-${videoNodeId}`,
+          source: charNodeId,
+          target: videoNodeId,
+          sourceHandle: "bottom",
+          targetHandle: "top",
+          type: "smoothstep",
+          animated: true,
+          style: { stroke: "#71717a", strokeWidth: 2 },
+        });
+
+        // 3. Background -> Video (bottom-up input)
+        clusterEdges.push({
+          id: `e-${bgNodeId}-${videoNodeId}`,
+          source: bgNodeId,
+          target: videoNodeId,
+          sourceHandle: "top",
+          targetHandle: "bottom",
+          type: "smoothstep",
+          animated: true,
+          style: { stroke: "#71717a", strokeWidth: 2 },
+        });
+
+        // 4. Temporal Progression Link: Video -> Next Scene's Keyframe
+        if (index < effectiveScenes.length - 1) {
+          const nextScene = effectiveScenes[index + 1];
+          const nextStartId = `start-${nextScene.order}`;
+          clusterEdges.push({
+            id: `e-temporal-${scene.order}-${nextScene.order}`,
+            source: videoNodeId,
+            target: nextStartId,
+            sourceHandle: "right",
+            targetHandle: "left",
+            type: "smoothstep",
+            animated: true,
+            style: { stroke: "#e4e4e7", strokeWidth: 2.5 },
+          });
         }
       });
 
-      // 5. TEMPORAL LINK
-      if (index < storyboard.length - 1) {
-        const nextScene = storyboard[index + 1];
-        newEdges.push({
-          id: `e-temporal-${scene.scene_number}`, source: videoNodeId, sourceHandle: 'right', target: `start-${nextScene.scene_number}`, targetHandle: 'left', type: 'smoothstep', animated: true, style: getEdgeStyle('background', '#14b8a6')
-        });
-      }
-    });
+      return clusterEdges;
+    }
 
-    setNodes(newNodes);
-    setEdges(newEdges);
-  }, [storyboard, generatedFrames, generatedChars, generatedBgs, generatedVideos, generatingAssets, assetErrors,activeEdgeRules]);
+    // VIEW MODE 2: TIMELINE MACRO EDGES
+    if (effectiveScenes.length <= 1) return [];
 
+    const result: Edge[] = [];
+    for (let index = 1; index < effectiveScenes.length; index++) {
+      const prevSceneId = effectiveScenes[index - 1].sceneId;
+      const currentSceneId = effectiveScenes[index].sceneId;
 
-  const containerClasses = isExpanded 
-    ? "fixed inset-4 z-[100] bg-[#0a0a0c] rounded-3xl shadow-2xl overflow-hidden border border-zinc-800 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)]" 
-    : "relative w-full h-full bg-[#0a0a0c] rounded-3xl overflow-hidden border border-zinc-800 transition-all duration-700 ease-[cubic-bezier(0.23,1,0.32,1)] min-h-[600px]";
-  
+      result.push({
+        id: `edge-${prevSceneId}-${currentSceneId}`,
+        source: prevSceneId,
+        target: currentSceneId,
+        sourceHandle: "right",
+        targetHandle: "left",
+        type: "smoothstep",
+        animated: true,
+        style: {
+          stroke: "#71717a",
+          strokeWidth: 2,
+        },
+      });
+    }
+    return result;
+  }, [viewMode, effectiveScenes]);
+
+  const charDesc = globalVault?.characterAnchor?.description || "Lead protagonist with cinematic detailing";
+  const envDesc = globalVault?.environmentAnchor?.description || "Volumetric neon atmospheric environment";
+  const isNineSixteen = globalVault?.aspectRatio === "9:16";
+
   return (
-    <div className={containerClasses}>
-      
-      {/* HUD Overlay / Controls */}
-      <div className="absolute top-4 left-4 right-4 z-10 flex justify-between items-center pointer-events-none">
-         <div className="bg-zinc-900/90 backdrop-blur-md px-4 py-2 rounded-xl border border-zinc-800 pointer-events-auto shadow-lg flex items-center gap-2">
-           <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
-             🎬 Key Instance Pipeline
-           </h2>
-         </div>
-         
-         <div className="flex items-center gap-3 pointer-events-auto">
-            {/* NEW: Play Sequence Button */}
-            <button 
-              onClick={() => { setCurrentPlayIndex(0); setShowPreview(true); }}
-              disabled={compiledVideos.length === 0}
-              className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600/90 hover:bg-indigo-500 text-white rounded-xl border border-indigo-500/50 shadow-[0_0_15px_rgba(99,102,241,0.4)] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Play className="w-4 h-4 fill-current" />
-              <span className="text-xs font-bold">Director's Cut</span>
-            </button>
+    <div className="relative w-full h-full bg-zinc-950 flex overflow-hidden">
+      {/* Main Canvas Area */}
+      <div className="flex-1 h-full relative overflow-hidden flex flex-col">
+        {/* --- TOP HUD BAR --- */}
+        <div className="absolute top-4 left-4 right-4 z-10 flex justify-between items-center pointer-events-none">
+          {/* Left: Key Instance Pipeline + Mode Switcher + Global Continuity Vault Header */}
+          <div className="flex items-center gap-2 pointer-events-auto flex-wrap">
+            {/* View Mode Switcher */}
+            <div className="bg-zinc-900 border border-zinc-800 p-1 rounded-md shadow-md flex items-center gap-1">
+              <button
+                onClick={() => setViewMode("graph")}
+                className={`px-2.5 py-1 rounded text-xs font-mono font-medium flex items-center gap-1.5 transition-colors ${
+                  viewMode === "graph"
+                    ? "bg-zinc-100 text-zinc-950 font-semibold"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+                title="Node Graph Compositor View (Full Asset Breakdown)"
+              >
+                <Network className="w-3.5 h-3.5" />
+                <span>Graph View</span>
+              </button>
 
-            {/* NEW: Download All Button */}
-            <button 
-              onClick={handleExport}
-              disabled={compiledVideos.length === 0 || isExporting}
-              className="flex items-center gap-2 px-4 py-2.5 bg-teal-600/90 hover:bg-teal-500 text-white rounded-xl border border-teal-500/50 shadow-[0_0_15px_rgba(20,184,166,0.4)] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              <span className="text-xs font-bold">{isExporting ? "Zipping..." : "Export Content"}</span>
-            </button>
+              <button
+                onClick={() => setViewMode("timeline")}
+                className={`px-2.5 py-1 rounded text-xs font-mono font-medium flex items-center gap-1.5 transition-colors ${
+                  viewMode === "timeline"
+                    ? "bg-zinc-100 text-zinc-950 font-semibold"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+                title="Linear Sequence Timeline View"
+              >
+                <LayoutList className="w-3.5 h-3.5" />
+                <span>Sequence View</span>
+              </button>
+            </div>
 
-            {/* Expand/Collapse Button */}
-            <button 
-              onClick={() => onExpand(!isExpanded)} 
-              className="p-2.5 bg-zinc-900/90 hover:bg-zinc-800 text-zinc-300 hover:text-white rounded-xl border border-zinc-800 shadow-lg transition-all duration-300 active:scale-95 ml-2"
-            >
-              {isExpanded ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
-            </button>
-         </div>
-      </div>
+            {/* GLOBAL CONTINUITY VAULT */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-md px-3 py-1 shadow-md flex items-center gap-3">
+              {/* Character Anchor */}
+              <div 
+                className="flex items-center gap-1.5 cursor-help group relative" 
+                title={`Character Anchor: ${charDesc} (PuLID Seed: #42)`}
+              >
+                <div className="w-5 h-5 rounded overflow-hidden bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
+                  {globalVault?.characterAnchor?.imageUrl ? (
+                    <img src={globalVault.characterAnchor.imageUrl} alt="Character" className="w-full h-full object-cover" />
+                  ) : (
+                    <User className="w-3 h-3 text-zinc-400" />
+                  )}
+                </div>
+                <span className="text-[11px] font-mono text-zinc-300 max-w-[120px] truncate hidden md:inline">
+                  {charDesc}
+                </span>
+              </div>
 
-      {/* React Flow Engine */}
-      <ReactFlow 
-        nodes={nodes} 
-        edges={edges} 
-        onNodesChange={onNodesChange} 
-        onEdgesChange={onEdgesChange} 
-        nodeTypes={nodeTypes} 
-        fitView
-        minZoom={0.1}
-        maxZoom={1.5}
-      >
-        <Background color="#27272a" gap={24} size={2} />
-        <Controls className="bg-zinc-900 border-zinc-800 fill-zinc-400 mb-4 ml-4" showInteractive={false} />
-      </ReactFlow>
+              <div className="w-px h-4 bg-zinc-800" />
 
-      {/* --- CINEMATIC PREVIEW MODAL --- */}
-      {showPreview && (
-        <div className="fixed inset-0 z-[200] bg-black/95 backdrop-blur-xl flex flex-col items-center justify-center p-8 animate-in fade-in duration-300">
-          
-          <div className="absolute top-6 right-6 flex items-center gap-4">
-            <span className="text-zinc-500 font-mono text-sm tracking-widest">
-              SCENE {currentPlayIndex + 1} OF {compiledVideos.length}
-            </span>
-            <button 
-              onClick={() => setShowPreview(false)}
-              className="p-3 bg-zinc-900/50 hover:bg-zinc-800 text-white rounded-full border border-zinc-700 transition-all hover:rotate-90"
-            >
-              <X className="w-6 h-6" />
-            </button>
+              {/* Environment Anchor */}
+              <div 
+                className="flex items-center gap-1.5 cursor-help group relative"
+                title={`Environment Anchor: ${envDesc}`}
+              >
+                <div className="w-5 h-5 rounded overflow-hidden bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
+                  {globalVault?.environmentAnchor?.imageUrl ? (
+                    <img src={globalVault.environmentAnchor.imageUrl} alt="Environment" className="w-full h-full object-cover" />
+                  ) : (
+                    <Mountain className="w-3 h-3 text-zinc-400" />
+                  )}
+                </div>
+                <span className="text-[11px] font-mono text-zinc-300 max-w-[120px] truncate hidden md:inline">
+                  {envDesc}
+                </span>
+              </div>
+
+              <div className="w-px h-4 bg-zinc-800" />
+
+              {/* Aspect Ratio Toggle (9:16 vertical vs 16:9 cinematic) */}
+              <button
+                onClick={() => updateVault({ aspectRatio: isNineSixteen ? "16:9" : "9:16" })}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-zinc-800 bg-zinc-950 text-[10px] font-mono text-zinc-300 hover:text-white hover:border-zinc-700 transition-colors"
+                title="Toggle Aspect Ratio"
+              >
+                {isNineSixteen ? <Smartphone className="w-3 h-3 text-emerald-400" /> : <Monitor className="w-3 h-3 text-zinc-400" />}
+                <span>{globalVault?.aspectRatio || "9:16"}</span>
+              </button>
+            </div>
+
+            {/* Zero-Token Delta Engine Indicator */}
+            {lastTokenResult && (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1 text-[10px] font-mono text-zinc-300 shadow-md flex items-center gap-1.5 hidden xl:flex">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Saved {lastTokenResult.tokensSaved} tokens (Cache Hit)</span>
+              </div>
+            )}
           </div>
 
-          <div className="relative w-full max-w-6xl aspect-video bg-zinc-950 rounded-2xl overflow-hidden shadow-[0_0_100px_rgba(99,102,241,0.15)] ring-1 ring-zinc-800">
-            {compiledVideos.length > 0 ? (
+          {/* Right: Actions (Sequence Preview & Final Cut Pro Export) */}
+          <div className="flex items-center gap-2 pointer-events-auto">
+            {/* Inspector Toggle Button */}
+            {selectedScene && !isInspectorOpen && (
+              <button
+                onClick={() => setIsInspectorOpen(true)}
+                className="h-8 px-3 rounded-md bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 text-xs font-medium flex items-center gap-1.5 transition-colors shadow-md"
+                title="Open Studio Inspector"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5 text-zinc-400" />
+                <span>Inspector</span>
+              </button>
+            )}
+
+            {/* Play Timeline Button */}
+            {compiledVideos.length > 0 && (
+              <button
+                onClick={() => {
+                  setCurrentPlayIndex(0);
+                  setShowPreview(true);
+                }}
+                className="h-8 px-3 rounded-md bg-zinc-100 text-zinc-950 hover:bg-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-lg"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                <span>Play Cut ({compiledVideos.length})</span>
+              </button>
+            )}
+
+            {/* FCPXML Timeline Export */}
+            <button
+              onClick={handleExportFCPXML}
+              disabled={isExporting || effectiveScenes.length === 0}
+              className="h-8 px-3 rounded-md bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 text-xs font-medium flex items-center gap-1.5 transition-colors disabled:opacity-50 shadow-md"
+              title="Export 9:16 Sequence Timeline to Final Cut Pro / Premiere"
+            >
+              {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Film className="w-3.5 h-3.5 text-zinc-400" />}
+              <span>{exportNotice || "Export FCPXML"}</span>
+            </button>
+
+            {/* Download MP4 Clips */}
+            {compiledVideos.length > 0 && (
+              <button
+                onClick={handleDownloadClips}
+                className="h-8 px-2.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-800 text-xs flex items-center gap-1 transition-colors shadow-md"
+                title="Download All Generated Clips"
+              >
+                <Download className="w-3.5 h-3.5 text-zinc-400" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* --- REACT FLOW CANVAS --- */}
+        <div className="w-full h-full">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={NODE_TYPES}
+            fitView
+            fitViewOptions={{ padding: 0.35, maxZoom: 1.1 }}
+            minZoom={0.15}
+            maxZoom={2}
+            className="bg-zinc-950"
+          >
+            <Background color="#27272a" gap={24} size={1} />
+            <Controls className="!bg-zinc-900 !border !border-zinc-800 !rounded-md !shadow-xl !fill-zinc-300" />
+          </ReactFlow>
+        </div>
+
+        {/* --- FULLSCREEN SEQUENCE PLAYER MODAL --- */}
+        {showPreview && (
+          <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col items-center justify-center p-6 animate-in fade-in duration-200">
+            <button 
+              onClick={() => setShowPreview(false)}
+              className="absolute top-6 right-6 p-2 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="w-full max-w-sm aspect-[9/16] bg-zinc-900 rounded-md overflow-hidden border border-zinc-800 relative shadow-2xl flex items-center justify-center">
               <video 
                 ref={previewVideoRef}
                 src={compiledVideos[currentPlayIndex]} 
+                className="w-full h-full object-cover"
                 autoPlay 
-                controls={false}
-                className="w-full h-full object-contain"
-                // The magic trick: When a video ends, instantly play the next one!
+                controls
                 onEnded={() => {
                   if (currentPlayIndex < compiledVideos.length - 1) {
                     setCurrentPlayIndex(prev => prev + 1);
                   } else {
-                    // Loop back to start when finished
-                    setCurrentPlayIndex(0);
+                    setShowPreview(false);
                   }
                 }}
               />
-            ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center text-zinc-500 gap-4">
-                <Film className="w-16 h-16 opacity-20" />
-                <p>No rendered scenes available.</p>
+              
+              <div className="absolute top-3 left-3 px-2 py-1 bg-zinc-950/80 rounded border border-zinc-800 text-[10px] font-mono text-zinc-300">
+                Scene {currentPlayIndex + 1} of {compiledVideos.length}
               </div>
-            )}
+            </div>
           </div>
-          
-          {/* Progress Indicator */}
-          <div className="flex gap-2 mt-8">
-            {compiledVideos.map((_, idx) => (
-              <div 
-                key={idx} 
-                className={`h-1.5 rounded-full transition-all duration-500 ${idx === currentPlayIndex ? 'w-8 bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.8)]' : 'w-2 bg-zinc-800'}`}
-              />
-            ))}
-          </div>
+        )}
+      </div>
 
-        </div>
+      {/* --- SCENE INSPECTOR DRAWER --- */}
+      {isInspectorOpen && selectedScene && (
+        <NodeInspector
+          scene={selectedScene}
+          storyboardItem={selectedStoryboardItem}
+          globalVault={globalVault}
+          isOpen={isInspectorOpen}
+          projectId={activeProjectId}
+          onClose={() => setIsInspectorOpen(false)}
+          onUpdateScene={updateScene}
+          onUpdateVault={updateVault}
+          onEnrichDelta={enrichSceneDelta}
+          onGenerateFrame={generateSceneFrame}
+          onGenerateCharacter={generateSceneCharacter}
+          onGenerateBackground={generateSceneBackground}
+          onGenerateVideo={generateSceneVideo}
+          isEnriching={Boolean(enrichingScenes[selectedScene.sceneId])}
+          isGeneratingVideo={Boolean(generatingAssets[selectedScene.sceneId])}
+          isGeneratingFrame={Boolean(generatingAssets[`start-${selectedScene.order}`] || generatingAssets[selectedScene.sceneId])}
+          isGeneratingCharacter={Boolean(generatingAssets[`char-char-1-${selectedScene.order}`])}
+          isGeneratingBackground={Boolean(generatingAssets[`bg-${selectedScene.order}`])}
+          lastTokenResult={lastTokenResult}
+        />
       )}
-
     </div>
   );
 }

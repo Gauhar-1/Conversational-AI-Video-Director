@@ -3,6 +3,7 @@ import { v2 as cloudinary } from "cloudinary";
 import Replicate from "replicate";
 import dbConnect from "@/lib/db";
 import { Project } from "@/models/Project";
+import { getAuthUser } from "@/lib/auth/getAuthUser";
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -29,8 +30,12 @@ export async function POST(req: Request) {
     }
 
     await dbConnect();
+    const { userId, isAuthenticated } = await getAuthUser(req);
+    if (!isAuthenticated || !userId) {
+      return NextResponse.json({ error: "Unauthorized: Valid access token required." }, { status: 401 });
+    }
 
-    const project = await Project.findById(projectId);
+    const project = await Project.findOne({ _id: projectId, userId });
     if (!project) {
       return NextResponse.json({ error: "Project not found in database." }, { status: 404 });
     }
@@ -102,20 +107,17 @@ export async function POST(req: Request) {
       console.warn("CDN sync skipped:", cdnErr.message);
     }
 
-    // Database Synchronization
-    const updatedProject = await Project.findOneAndUpdate(
-      { _id: projectId, "storyboard.scene_number": sceneNumber },
-      { 
-        $set: { 
-          "storyboard.$.frame_url": finalImageUrl,
-        } 
-      }, 
-      { returnDocument: 'after' } 
-    );
+    // Always update scenes firstFrameUrl
+    await Project.updateOne(
+      { _id: projectId, userId, "scenes.order": sceneNumber },
+      { $set: { "scenes.$.firstFrameUrl": finalImageUrl } }
+    ).catch(() => {});
 
-    if (!updatedProject) {
-      return NextResponse.json({ error: "Frame generated, but failed to save to database." }, { status: 500 });
-    }
+    // Also update in storyboard if available
+    await Project.updateOne(
+      { _id: projectId, userId, "storyboard.scene_number": sceneNumber },
+      { $set: { "storyboard.$.frame_url": finalImageUrl } }
+    ).catch(() => {});
 
     return NextResponse.json({ 
       status: "success",
