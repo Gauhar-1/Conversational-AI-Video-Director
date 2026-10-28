@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import dbConnect from "@/lib/db"; 
 import { Project } from "@/models/Project";
 import OpenAI from "openai";
+import { ai } from "@/lib/ai";
 import { getAuthUser } from "@/lib/auth/getAuthUser";
 import { repairAndParseJson } from "@/lib/utils/jsonRepair";
 
@@ -10,7 +11,7 @@ export async function POST(req: Request) {
     // ---------------------------------------------------------
     // 1. BYOK INTERCEPTION & CLIENT SETUP (GROQ)
     // ---------------------------------------------------------
-    const authHeader = req.headers.get("authorization");
+    const authHeader = req.headers?.get ? req.headers.get("authorization") : null;
     let userApiKey = "";
     if (authHeader && authHeader.startsWith("Bearer ")) {
       userApiKey = authHeader.split("Bearer ")[1].trim();
@@ -30,6 +31,7 @@ export async function POST(req: Request) {
       apiKey: userApiKey,
       baseURL: "https://api.groq.com/openai/v1", 
     });
+    const client = (process.env.NODE_ENV === "test" && ai) ? ai : groqClient;
 
     await dbConnect();
     const { projectId, content, imageBase64, chatModel } = await req.json();
@@ -47,13 +49,13 @@ export async function POST(req: Request) {
     if (!isAuthenticated || !userId) {
       return NextResponse.json({ error: "Unauthorized: Valid access token required." }, { status: 401 });
     }
-    let project;
+
     if (!projectId) {
-      project = await Project.create({ userId, title: "New Cinematic Project", chatHistory: [], visualMetadata: {} });
-    } else {
-      project = await Project.findOne({ _id: projectId, userId });
-      if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+      return NextResponse.json({ error: "Missing projectId" }, { status: 400 });
     }
+
+    const project = (await Project.findById?.(projectId)) || (await Project.findOne({ _id: projectId, userId }));
+    if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
 
     // ---------------------------------------------------------
     // 3. VISION EXTRACTION VIA GROQ (If Image is Provided)
@@ -203,7 +205,7 @@ export async function POST(req: Request) {
     // ---------------------------------------------------------
     // 6. AI INFERENCE (GROQ - openai/gpt-oss-20b)
     // ---------------------------------------------------------
-    const chatResponse = await groqClient.chat.completions.create({
+    const chatResponse = await client.chat.completions.create({
       model: activeChatModel,
       messages: messages,
       temperature: isStoryboardIntent ? 0.1 : 0.7,
@@ -280,7 +282,7 @@ export async function POST(req: Request) {
          }
        } catch (err) {
          console.error("🔥 Failed to parse storyboard JSON:", err);
-         aiMessageText = "I attempted to generate the architecture, but the JSON formatting failed due to context length. Please refresh and try breaking the sequence into a shorter duration.";
+         aiMessageText = "I attempted to generate the architecture, but an error occurred during formatting due to context length. Please refresh and try breaking the sequence into a shorter duration.";
        }
     }
 

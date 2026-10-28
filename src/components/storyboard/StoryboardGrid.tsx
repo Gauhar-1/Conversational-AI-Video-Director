@@ -24,6 +24,7 @@ import { BackgroundNode } from "./nodes/BackgroundNode";
 import NodeInspector from "./NodeInspector";
 import { useStoryboard } from "./hooks/useStoryBoard";
 import { compileFCPXML, downloadFCPXML } from "@/lib/fcpxml";
+import { FCPXMLExportWizard } from "@/components/export/FCPXMLExportWizard";
 import { CameraAngle, ISceneDoc } from "@/models/Project";
 
 // Static node types defined outside component to prevent React Flow re-registration loops
@@ -46,25 +47,31 @@ export default function StoryboardCanvas({
   isExpanded = true, 
   onExpand 
 }: StoryboardCanvasProps) {
-  // View mode: "graph" (Cluster multi-node) vs "timeline" (Macro linear sequence)
-  const [viewMode, setViewMode] = useState<"graph" | "timeline">("graph");
+  // View mode: "timeline" (Macro linear sequence) vs "graph" (Cluster multi-node)
+  const [viewMode, setViewMode] = useState<"graph" | "timeline">("timeline");
 
   // Preview & Export States
   const [showPreview, setShowPreview] = useState(false);
   const [currentPlayIndex, setCurrentPlayIndex] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
+  const [isExportWizardOpen, setIsExportWizardOpen] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement>(null);
 
   const { 
+    project,
     scenes, 
     globalVault, 
+    globalAssets,
     storyboard,
     enrichingScenes, 
     lastTokenResult,
     enrichSceneDelta,
     updateScene,
     updateVault,
+    selectTake,
+    deleteTake,
+    iterateTake,
     generateSceneFrame,
     generateSceneCharacter,
     generateSceneBackground,
@@ -131,48 +138,51 @@ export default function StoryboardCanvas({
     }
   }, [effectiveScenes, enrichSceneDelta]);
 
-  // Gather all valid videos in chronological order
+  // Gather all valid active take videos in chronological order (Requirement 5)
   const compiledVideos = useMemo(() => {
     return effectiveScenes
-      .map(s => s.videoUrl)
-      .filter((url): url is string => Boolean(url && url.trim() !== ""));
+      .map((s, idx) => {
+        const activeTake = s.takes?.find((t) => t.takeId === s.activeTakeId) || s.takes?.[0];
+        const videoUrl = activeTake?.videoUrl || s.videoUrl || "";
+        return {
+          sceneId: s.sceneId,
+          order: s.order || (s as any).sceneNumber || idx + 1,
+          videoUrl,
+          takeNumber: (activeTake as any)?.takeNumber || 1,
+        };
+      })
+      .filter((item) => Boolean(item.videoUrl && item.videoUrl.trim() !== ""));
   }, [effectiveScenes]);
 
-  // FCPXML Compiler & Downloader
+  // Handle advancing to the next scene (Requirement 4)
+  const handleNextScene = useCallback(() => {
+    if (!selectedScene) return;
+    const currentIndex = effectiveScenes.findIndex((s) => s.sceneId === selectedScene.sceneId);
+    if (currentIndex >= 0 && currentIndex < effectiveScenes.length - 1) {
+      setSelectedSceneId(effectiveScenes[currentIndex + 1].sceneId);
+    }
+  }, [effectiveScenes, selectedScene]);
+
+  // Guided FCPXML Export Wizard Trigger (Requirement 6)
   const handleExportFCPXML = () => {
     if (effectiveScenes.length === 0) {
       alert("No scenes available to export. Create scenes in Writer's Room first.");
       return;
     }
-
-    try {
-      setIsExporting(true);
-      setExportNotice("Compiling FCPXML...");
-      const projectName = `Director_AI_Sequence_${new Date().toISOString().slice(0, 10)}`;
-      const fcpxmlString = compileFCPXML({ scenes: effectiveScenes, projectTitle: projectName });
-      downloadFCPXML(fcpxmlString, `${projectName}.fcpxml`);
-
-      setExportNotice("Exported (.fcpxml)");
-      setTimeout(() => setExportNotice(null), 3000);
-    } catch (err: any) {
-      console.error("FCPXML Export Failed:", err);
-      alert("Failed to export FCPXML: " + err.message);
-    } finally {
-      setIsExporting(false);
-    }
+    setIsExportWizardOpen(true);
   };
 
   const handleDownloadClips = async () => {
     if (compiledVideos.length === 0) return;
     for (let i = 0; i < compiledVideos.length; i++) {
       const a = document.createElement("a");
-      a.href = compiledVideos[i];
-      a.download = `Scene_${i + 1}_Clip.mp4`;
+      a.href = compiledVideos[i].videoUrl;
+      a.download = `Scene_${compiledVideos[i].order}_Take_${compiledVideos[i].takeNumber}.mp4`;
       a.target = "_blank";
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      await new Promise(r => setTimeout(r, 600));
+      await new Promise((r) => setTimeout(r, 600));
     }
   };
 
@@ -184,9 +194,11 @@ export default function StoryboardCanvas({
 
     // VIEW MODE 1: CLUSTER GRAPH VIEW (FrameNode, CharacterNode, BackgroundNode, VideoNode)
     if (viewMode === "graph") {
-      const sceneSpacing = 1100;
-      const startX = 60;
-      const centerY = 360;
+      // Symmetrical, zero-overlap diamond cluster layout
+      // Spacing is mathematically guaranteed to prevent overlap even as scenes & assets scale
+      const sceneSpacing = 1250;
+      const startX = 80;
+      const centerY = 460;
 
       const clusterNodes: Node[] = [];
 
@@ -199,12 +211,12 @@ export default function StoryboardCanvas({
         const bgNodeId = `bg-${scene.order}`;
         const videoNodeId = `video-${scene.order}`;
 
-        // 1. LEFT: Start Frame Node (Keyframe)
+        // 1. LEFT: Start Frame Node (Keyframe: 288px wide, vertically centered with VideoNode)
         const frameImg = generatedFrames[startNodeId] || scene.firstFrameUrl || sbItem?.frame_url || "";
         clusterNodes.push({
           id: startNodeId,
           type: "frameNode",
-          position: { x: baseX, y: centerY },
+          position: { x: baseX, y: centerY + 50 },
           data: {
             scene: { ...scene, scene_number: scene.order, frame_prompt: scene.imagePrompt || sbItem?.frame_prompt },
             imageUrl: frameImg,
@@ -221,7 +233,7 @@ export default function StoryboardCanvas({
           selected: selectedSceneId === scene.sceneId,
         });
 
-        // 2. TOP: Character Node
+        // 2. TOP: Character Node (288px wide, centered horizontally above VideoNode with 120px clearance)
         const charData = sbItem?.characters?.[0] || {
           _id: "char-1",
           name: "Main Subject",
@@ -232,7 +244,7 @@ export default function StoryboardCanvas({
         clusterNodes.push({
           id: charNodeId,
           type: "characterNode",
-          position: { x: baseX + 340, y: centerY - 320 },
+          position: { x: baseX + 466, y: centerY - 480 },
           data: {
             scene: { ...scene, scene_number: scene.order },
             character: charData,
@@ -254,14 +266,14 @@ export default function StoryboardCanvas({
           selected: selectedSceneId === scene.sceneId,
         });
 
-        // 3. BOTTOM: Background Node
+        // 3. BOTTOM: Background Node (288px wide, centered horizontally below VideoNode with 100px clearance)
         const bgImg = generatedBgs[bgNodeId] || sbItem?.background_url || globalVault?.environmentAnchor?.imageUrl || "";
         const bgPrompt = sbItem?.environment_prompt || globalVault?.environmentAnchor?.description || "Cinematic environment atmosphere";
 
         clusterNodes.push({
           id: bgNodeId,
           type: "backgroundNode",
-          position: { x: baseX + 340, y: centerY + 280 },
+          position: { x: baseX + 466, y: centerY + 640 },
           data: {
             scene: { ...scene, scene_number: scene.order },
             prompt: bgPrompt,
@@ -283,12 +295,12 @@ export default function StoryboardCanvas({
           selected: selectedSceneId === scene.sceneId,
         });
 
-        // 4. CENTER: Video Node
+        // 4. CENTER: Video Node (380px wide, anchors the scene cluster)
         const videoUrl = generatedVideos[scene.order] || scene.videoUrl || sbItem?.video_url || "";
         clusterNodes.push({
           id: videoNodeId,
           type: "videoNode",
-          position: { x: baseX + 340, y: centerY },
+          position: { x: baseX + 420, y: centerY },
           data: {
             scene: { ...scene, scene_number: scene.order, video_prompt: scene.motionPrompt || sbItem?.video_prompt },
             prompt: scene.motionPrompt || sbItem?.video_prompt || scene.rawDelta,
@@ -317,7 +329,7 @@ export default function StoryboardCanvas({
     }
 
     // VIEW MODE 2: TIMELINE MACRO SEQUENCE VIEW (SceneMacroNode)
-    const HORIZONTAL_SPACING = 340;
+    const HORIZONTAL_SPACING = 400;
     const START_X = 80;
     const START_Y = 160;
 
@@ -334,9 +346,11 @@ export default function StoryboardCanvas({
           scene,
           storyboardItem: sbItem,
           globalVault,
+          globalAssets,
           onSelect: handleSelectScene,
           onUpdateAngle: handleUpdateAngle,
           onEnrichDelta: enrichSceneDelta,
+          onSelectTake: selectTake,
           isEnriching: Boolean(enrichingScenes[scene.sceneId]),
         },
         selected: selectedSceneId === scene.sceneId,
@@ -632,34 +646,61 @@ export default function StoryboardCanvas({
           </ReactFlow>
         </div>
 
-        {/* --- FULLSCREEN SEQUENCE PLAYER MODAL --- */}
-        {showPreview && (
-          <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col items-center justify-center p-6 animate-in fade-in duration-200">
+        {/* --- GLOBAL SEQUENTIAL VIDEO PLAYBACK OVERLAY (Requirement 5) --- */}
+        {showPreview && compiledVideos.length > 0 && (
+          <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col items-center justify-center p-6 animate-in fade-in duration-200 select-none">
             <button 
               onClick={() => setShowPreview(false)}
               className="absolute top-6 right-6 p-2 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white transition-colors"
+              title="Close Sequence Player"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <div className="w-full max-w-sm aspect-[9/16] bg-zinc-900 rounded-md overflow-hidden border border-zinc-800 relative shadow-2xl flex items-center justify-center">
-              <video 
-                ref={previewVideoRef}
-                src={compiledVideos[currentPlayIndex]} 
-                className="w-full h-full object-cover"
-                autoPlay 
-                controls
-                onEnded={() => {
-                  if (currentPlayIndex < compiledVideos.length - 1) {
-                    setCurrentPlayIndex(prev => prev + 1);
-                  } else {
-                    setShowPreview(false);
-                  }
-                }}
-              />
-              
-              <div className="absolute top-3 left-3 px-2 py-1 bg-zinc-950/80 rounded border border-zinc-800 text-[10px] font-mono text-zinc-300">
-                Scene {currentPlayIndex + 1} of {compiledVideos.length}
+            <div className="w-full max-w-sm flex flex-col items-center gap-3">
+              <div className="w-full aspect-[9/16] bg-zinc-900 rounded-md overflow-hidden border border-zinc-800 relative shadow-2xl flex items-center justify-center">
+                {/* Single <video> element with instant src swap on ended */}
+                <video 
+                  ref={previewVideoRef}
+                  key={compiledVideos[currentPlayIndex]?.videoUrl}
+                  src={compiledVideos[currentPlayIndex]?.videoUrl} 
+                  className="w-full h-full object-cover"
+                  autoPlay 
+                  controls
+                  onEnded={() => {
+                    if (currentPlayIndex < compiledVideos.length - 1) {
+                      setCurrentPlayIndex((prev) => prev + 1);
+                    } else {
+                      setShowPreview(false);
+                      setCurrentPlayIndex(0);
+                    }
+                  }}
+                />
+                
+                <div className="absolute top-3 left-3 px-2 py-1 bg-zinc-950/80 rounded border border-zinc-800 text-[10px] font-mono text-zinc-300">
+                  Scene {compiledVideos[currentPlayIndex]?.order} (Take {compiledVideos[currentPlayIndex]?.takeNumber}) • {currentPlayIndex + 1}/{compiledVideos.length}
+                </div>
+              </div>
+
+              {/* Playlist Controls */}
+              <div className="w-full flex items-center justify-between px-3 py-2 bg-zinc-900 border border-zinc-800 rounded-md text-xs font-mono">
+                <button
+                  onClick={() => setCurrentPlayIndex((prev) => Math.max(0, prev - 1))}
+                  disabled={currentPlayIndex === 0}
+                  className="px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-300 transition-colors"
+                >
+                  Prev Clip
+                </button>
+                <span className="text-zinc-400">
+                  Clip {currentPlayIndex + 1} of {compiledVideos.length}
+                </span>
+                <button
+                  onClick={() => setCurrentPlayIndex((prev) => Math.min(compiledVideos.length - 1, prev + 1))}
+                  disabled={currentPlayIndex === compiledVideos.length - 1}
+                  className="px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-zinc-300 transition-colors"
+                >
+                  Next Clip
+                </button>
               </div>
             </div>
           </div>
@@ -672,6 +713,7 @@ export default function StoryboardCanvas({
           scene={selectedScene}
           storyboardItem={selectedStoryboardItem}
           globalVault={globalVault}
+          globalAssets={globalAssets}
           isOpen={isInspectorOpen}
           projectId={activeProjectId}
           onClose={() => setIsInspectorOpen(false)}
@@ -682,6 +724,10 @@ export default function StoryboardCanvas({
           onGenerateCharacter={generateSceneCharacter}
           onGenerateBackground={generateSceneBackground}
           onGenerateVideo={generateSceneVideo}
+          onSelectTake={selectTake}
+          onDeleteTake={deleteTake}
+          onIterateTake={iterateTake}
+          onNextScene={handleNextScene}
           isEnriching={Boolean(enrichingScenes[selectedScene.sceneId])}
           isGeneratingVideo={Boolean(generatingAssets[selectedScene.sceneId])}
           isGeneratingFrame={Boolean(generatingAssets[`start-${selectedScene.order}`] || generatingAssets[selectedScene.sceneId])}
@@ -690,6 +736,15 @@ export default function StoryboardCanvas({
           lastTokenResult={lastTokenResult}
         />
       )}
+
+      {/* --- GUIDED FCPXML EXPORT WIZARD MODAL (Requirement 6) --- */}
+      <FCPXMLExportWizard
+        isOpen={isExportWizardOpen}
+        onClose={() => setIsExportWizardOpen(false)}
+        projectName={project?.title || "Director_AI_Sequence"}
+        scenes={effectiveScenes}
+        fps={24}
+      />
     </div>
   );
 }

@@ -260,4 +260,89 @@ Clicking on ANY node in either view mode immediately launches the slide-out `Nod
 *   **Prompt & Framing Physics:** Zero-token camera angle selector (`CAM_A_CENTER`, `CAM_B_45_CLOSE`, `CAM_C_OTS`), Action Intent Delta, 9:16 master image prompt, and 10s motion prompt.
 *   **Video Generation:** Multi-model Replicate dispatch (Kling 2.5 Turbo Pro, Wan 2.5, MiniMax Video-01, Luma Ray) with asynchronous task polling.
 
+---
+
+## 11. Guided 4-Stage Progressive Disclosure Architecture & Data Repositories
+
+### 11.1. The 4-Stage Pipeline Model
+The pipeline abandons spaghetti node graphs in favor of a clean, linear, 4-stage disclosure workflow:
+1. **The Writer's Room (`/project/[id]/script`):** Distraction-free conversational screenplay development with Groq 20B parsing dialogue and action into structured JSON.
+2. **The Casting & Scouting Wizard (`/project/[id]/casting`):** E-commerce asset approval grid. Generates static reference images for Characters (FLUX + PuLID seed consistency) and Locations (atmospheric background plates). Approved assets are saved directly to `Project.global_assets`.
+3. **The Auto-Wired Timeline (`/project/[id]/pipeline`):** Strict horizontal, non-branching timeline of `SceneMacroNodes`. Characters and Locations are implicitly wired by backend logic and surfaced as avatar badges. Granular prompt variations and multi-take generations are managed via the right-hand `InspectorDrawer`.
+4. **The Playback & Export Engine (`/project/[id]/export`):** Docked sequential player for approved takes, direct local file-sync, and Final Cut Pro XML (`.fcpxml`) export.
+
+### 11.2. Isolated Database Repository Tier (`/lib/db/repositories`)
+In accordance with SOLID principles (Single Responsibility & Dependency Inversion), all data tier queries are decoupled into dedicated repositories:
+
+| Repository | Interface | Primary Responsibility & Performance Optimization |
+|---|---|---|
+| `ProjectRepository` | `IProjectRepository` | Aggregate project lifecycle, progressive stage transitions (`updateStage`), and ultra-lean dashboard summary projections (`.select('_id userId title currentStage aspectRatio scenes.sceneId global_assets updatedAt')`). |
+| `AssetRepository` | `IAssetRepository` | Isolated Casting & Scouting vault operations on `Project.global_assets` (character generation history, reference image approval, location plates). |
+| `SceneRepository` | `ISceneRepository` | High-frequency delta updates (`PATCH /api/scenes/[id]`), timeline reordering, and multi-take variations (`addTake`, `setActiveTake`, `deleteTake`). |
+
+### 11.3. Granular Delta Update Protocol (Bandwidth Optimization)
+Scene modifications (e.g., updating camera angles or framing deltas) bypass whole-document saves. The `SceneRepository.updateSceneDelta` executes atomic positional `$set` operations using MongoDB array filters:
+```typescript
+await Project.findOneAndUpdate(
+  { userId, "scenes.sceneId": sceneId },
+  { $set: { "scenes.$.cameraAngle": delta.cameraAngle } },
+  { new: true, runValidators: true }
+);
+```
+This guarantees minimal network bandwidth, zero race conditions on concurrent scene edits, and deterministic multi-tenant security.
+
+---
+
+## 12. Guided Workflow & Cognitive Load Optimization (UI/UX Specification)
+
+To ensure creators are never overwhelmed by node-graph complexity, the UI enforces strict progressive disclosure and guided guardrails:
+
+### 12.1. Casting & Scouting Wizard: Enriched Prompt Interfaces
+*   **Large Inputs with Internal Scrollbars:** All prompt creation and editing areas feature expanded textareas (`min-h-[160px] p-4 text-sm leading-relaxed resize-y bg-zinc-900 border-zinc-700 font-sans custom-scrollbar`) that comfortably accommodate long external prompts.
+*   **Groq Prompt Enrichment Action:** An "Enrich Prompt" button with a sparkle icon sits directly below each prompt textarea. When clicked, it calls Groq's high-speed LLM to rewrite basic narrative ideas into richly detailed, photorealistic prompts tailored for FLUX and PuLID face conditioning.
+
+### 12.2. Video Node Inspector: Read-Only Asset Abstraction
+*   **Asset Decoupling:** Inside the React Flow timeline, character and location anchors cannot be edited directly. They appear as compact 32px circular avatar pills with clear labels (e.g., "Detective Moreau", "Rainy Alleyway").
+*   **Routing Escape Hatch:** A subtle "Edit in Casting Tab" link routes filmmakers back to Stage 2 (`/project/[id]/casting`) if they need to regenerate or alter core reference sheets.
+
+### 12.3. Guided Onboarding: Pre-Flight Checklist & The First Frame Decision
+When a user opens an ungenerated Scene node, the Inspector presents an onboarding state rather than empty inputs:
+1.  **Production Checklist:** Visual success indicators confirming required inputs are already locked (`[x] LLM Loaded`, `[x] Character Locked`, `[x] Environment Locked`, `[x] Camera Framing Configured`).
+2.  **The First Frame Decision:**
+    *   *Primary Action (Recommended):* "Generate First Frame" — locks visual composition and likeness before generating temporal motion.
+    *   *Secondary Action (Fast):* "Let Model Decide" — skips the keyframe step and dispatches directly to the generative video engine.
+
+### 12.4. Post-Generation UX: Default-Branching Engine
+Once a video clip is generated, the Inspector provides two clear, safe paths:
+*   **Accept & Move to Next Scene:** Confirms the active take and advances selection to the subsequent timeline node.
+*   **Iterate & Branch (Default):** Safely duplicates the scene state as a new Take, preserves prior video takes in version history, and clears the active intent prompt for tweaking.
+
+### 12.5. Real-Time Sequential Playback Engine (JS Playlist Logic)
+*   Global video playback overlay streams the entire sequence without requiring cloud rendering or FFmpeg stitching.
+*   A single `<video>` element with an `onEnded` event listener swaps the `src` dynamically to the next active take in the array, providing an instantaneous screening room experience.
+
+### 12.6. FCPXML Export Wizard (File System Access API)
+*   **Step 1:** Informs the filmmaker that Director AI will download all active takes directly to a local destination folder for offline NLE linking.
+*   **Step 2:** Triggers `window.showDirectoryPicker()` to select a target directory on the user's computer.
+*   **Step 3:** Displays a live progress bar while writing video takes and the compiled `timeline.fcpxml` (with 1.3x scale transforms for close-up punch-ins) directly to disk.
+*   **Conclusion:** Displays a success state confirming: "Export Complete. Drag the timeline.fcpxml file into DaVinci Resolve."
+
+### 12.7. Inspector Drawer Tab Architecture & Pre-Flight Isolation
+To eliminate cognitive clutter, inspector cards are strictly segregated across dedicated tabs:
+*   **`compose` Tab:** Exclusively hosts the **Pre-Flight Production Checklist** when a scene is ungenerated, guiding the filmmaker through asset readiness and the First Frame Decision before revealing keyframe and camera angle controls.
+*   **`takes` Tab:** Exclusively hosts the **Post-Generation Decision Card** ("Active Take Ready", "Accept & Next", and "Iterate & Branch") once a video clip exists, alongside the take variation history list.
+*   **`prompts` & `render` Tabs:** Kept completely pristine for raw/enriched prompt copy and targeted video engine render settings.
+
+### 12.8. Deterministic Zero-Overlap Cluster Graph Geometry
+In React Flow Cluster Graph view (`viewMode === "graph"`), nodes are arranged in a mathematically guaranteed, symmetrical diamond formation:
+*   `sceneSpacing = 1250px`, `startX = 80px`, `centerY = 460px`.
+*   **`FrameNode` (288px wide):** Positioned at `(baseX, centerY + 50)`, aligning horizontally with the Video Node's input handle.
+*   **`VideoNode` (380px wide):** Positioned at `(baseX + 420, centerY)`, serving as the central hub.
+*   **`CharacterNode` (288px wide):** Centered horizontally above `VideoNode` at `(baseX + 466, centerY - 480)`, providing a generous 120px clearance.
+*   **`BackgroundNode` (288px wide):** Centered horizontally below `VideoNode` at `(baseX + 466, centerY + 640)`, providing 100px vertical clearance.
+*   **Horizontal Inter-Cluster Clearance:** Leaves 450px of clean runway between consecutive scenes, preventing any node collisions as production assets expand.
+
+
+
+
 

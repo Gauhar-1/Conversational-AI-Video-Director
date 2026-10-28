@@ -1,15 +1,31 @@
 "use client";
 
+/**
+ * @file src/components/storyboard/nodes/SceneMacroNode.tsx
+ * @description Studio-Grade SceneMacroNode component for the Auto-Wired Timeline.
+ * Strict non-branching horizontal timeline card displaying implicitly wired Character
+ * and Location avatar badges, active take video preview, and take variations selector.
+ * Fully optimized with React.memo() and monochromatic zinc design tokens.
+ */
+
 import { memo, useState, useEffect } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
-import { CameraAngle, ISceneDoc } from "@/models/Project";
-import { Film, Sparkles, Loader2, Play, ChevronDown, CheckCircle2, User, Mountain, Image as ImageIcon, SlidersHorizontal } from "lucide-react";
+import { CameraAngle, ISceneDoc, IGlobalAssetsDoc, ITakeDoc } from "@/models/Project";
+import { 
+  Film, Sparkles, Loader2, Play, ChevronDown, CheckCircle2, 
+  User, Mountain, Image as ImageIcon, SlidersHorizontal, Layers 
+} from "lucide-react";
 import { IGlobalVault } from "@/models/Project";
 
 const ANGLE_LABELS: Record<CameraAngle, { short: string; full: string; badge: string }> = {
   CAM_A_CENTER: { short: "CAM A", full: "Wide Center", badge: "bg-zinc-800 text-zinc-200 border-zinc-700" },
   CAM_B_45_CLOSE: { short: "CAM B", full: "45° Close", badge: "bg-zinc-800 text-zinc-200 border-zinc-700" },
   CAM_C_OTS: { short: "CAM C", full: "Over Shoulder", badge: "bg-zinc-800 text-zinc-200 border-zinc-700" },
+  CLOSE_UP: { short: "CU", full: "Close Up", badge: "bg-zinc-800 text-zinc-200 border-zinc-700" },
+  MEDIUM_SHOT: { short: "MED", full: "Medium Shot", badge: "bg-zinc-800 text-zinc-200 border-zinc-700" },
+  WIDE_SHOT: { short: "WIDE", full: "Wide Shot", badge: "bg-zinc-800 text-zinc-200 border-zinc-700" },
+  EXTREME_CLOSE_UP: { short: "ECU", full: "Extreme Close Up", badge: "bg-zinc-800 text-zinc-200 border-zinc-700" },
+  ESTABLISHING: { short: "EST", full: "Establishing", badge: "bg-zinc-800 text-zinc-200 border-zinc-700" },
 };
 
 export const SceneMacroNode = memo(({ data, selected }: NodeProps) => {
@@ -17,26 +33,44 @@ export const SceneMacroNode = memo(({ data, selected }: NodeProps) => {
     scene,
     storyboardItem,
     globalVault,
+    globalAssets,
     onSelect,
     onUpdateAngle,
     onEnrichDelta,
+    onSelectTake,
     isEnriching = false,
   } = data as {
     scene: ISceneDoc;
     storyboardItem?: any;
     globalVault?: IGlobalVault;
+    globalAssets?: IGlobalAssetsDoc;
     onSelect?: (scene: ISceneDoc) => void;
     onUpdateAngle?: (sceneId: string, angle: CameraAngle) => void;
     onEnrichDelta?: (sceneId: string, rawDelta: string, angle: CameraAngle) => void;
+    onSelectTake?: (sceneId: string, takeId: string) => void;
     isEnriching?: boolean;
   };
 
-  const charUrl = storyboardItem?.characters?.[0]?.generated_url || globalVault?.characterAnchor?.imageUrl;
-  const bgUrl = storyboardItem?.background_url || globalVault?.environmentAnchor?.imageUrl;
+  // Find implicitly wired characters & locations from global_assets or legacy globalVault
+  const wiredCharacters = (globalAssets?.characters || []).filter(
+    (c) => !scene.characterIds || scene.characterIds.length === 0 || scene.characterIds.includes(c.assetId)
+  );
+
+  const wiredLocation = (globalAssets?.locations || []).find(
+    (l) => scene.locationId === l.assetId
+  ) || globalAssets?.locations?.[0];
+
+  const primaryChar = wiredCharacters[0];
+  const charUrl = primaryChar?.imageUrl || storyboardItem?.characters?.[0]?.generated_url || globalVault?.characterAnchor?.imageUrl;
+  const bgUrl = wiredLocation?.imageUrl || storyboardItem?.background_url || globalVault?.environmentAnchor?.imageUrl;
 
   const [deltaInput, setDeltaInput] = useState(scene.rawDelta || "");
   const [currentAngle, setCurrentAngle] = useState<CameraAngle>(scene.cameraAngle || "CAM_A_CENTER");
   const [isPlaying, setIsPlaying] = useState(false);
+
+  const takes = scene.takes || [];
+  const activeTake = takes.find((t) => t.takeId === scene.activeTakeId) || takes[0];
+  const activeVideoUrl = scene.videoUrl || activeTake?.videoUrl || "";
 
   useEffect(() => {
     setDeltaInput(scene.rawDelta || "");
@@ -75,7 +109,7 @@ export const SceneMacroNode = memo(({ data, selected }: NodeProps) => {
           : "border-zinc-800 hover:border-zinc-700"
       }`}
     >
-      {/* Node Temporal Flow Handles */}
+      {/* Node Temporal Flow Handles: Strict horizontal timeline */}
       <Handle
         type="target"
         position={Position.Left}
@@ -98,7 +132,7 @@ export const SceneMacroNode = memo(({ data, selected }: NodeProps) => {
           <span className="text-[10px] font-mono text-zinc-500">{scene.duration || 10}s</span>
         </div>
 
-        {/* Camera Angle Dropdown */}
+        {/* Camera Angle Selector Dropdown */}
         <div className="relative" onClick={(e) => e.stopPropagation()}>
           <select
             value={currentAngle}
@@ -114,6 +148,15 @@ export const SceneMacroNode = memo(({ data, selected }: NodeProps) => {
             <option value="CAM_C_OTS" className="bg-zinc-900 text-zinc-200">
               CAM C (OTS)
             </option>
+            <option value="CLOSE_UP" className="bg-zinc-900 text-zinc-200">
+              Close Up
+            </option>
+            <option value="MEDIUM_SHOT" className="bg-zinc-900 text-zinc-200">
+              Medium Shot
+            </option>
+            <option value="WIDE_SHOT" className="bg-zinc-900 text-zinc-200">
+              Wide Shot
+            </option>
           </select>
           <ChevronDown className="w-3 h-3 absolute right-1.5 top-1.5 pointer-events-none opacity-60 text-zinc-400" />
         </div>
@@ -123,10 +166,10 @@ export const SceneMacroNode = memo(({ data, selected }: NodeProps) => {
       <div className="p-3 bg-zinc-950">
         <div className="w-full aspect-[9/16] bg-zinc-900 rounded-md overflow-hidden border border-zinc-800 relative flex items-center justify-center group/media">
           {/* Active Video Player */}
-          {scene.videoUrl ? (
+          {activeVideoUrl ? (
             <div className="w-full h-full relative">
               <video
-                src={scene.videoUrl}
+                src={activeVideoUrl}
                 className="w-full h-full object-cover"
                 loop
                 muted
@@ -180,67 +223,73 @@ export const SceneMacroNode = memo(({ data, selected }: NodeProps) => {
           <div className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded bg-zinc-950/80 text-[9px] font-mono text-zinc-300 border border-zinc-800">
             {angleConfig.short}
           </div>
+
+          {/* Takes Badge: Shows Active Take count */}
+          {takes.length > 0 && (
+            <div className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded bg-zinc-950/90 text-[9px] font-mono text-zinc-200 border border-zinc-700 flex items-center gap-1 shadow-sm">
+              <Layers className="w-2.5 h-2.5 text-zinc-400" />
+              <span>Take {activeTake ? activeTake.takeNumber : 1}/{takes.length}</span>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* --- ASSET OVERVIEW STRIP (Keyframe, Character, Environment) --- */}
-      <div className="px-3 py-2 bg-zinc-950 border-t border-zinc-800/80 grid grid-cols-3 gap-1.5 nodrag">
-        {/* Keyframe asset pill */}
-        <div
-          onClick={(e) => {
-            e.stopPropagation();
-            if (onSelect) onSelect(scene);
-          }}
-          className="flex items-center gap-1.5 p-1 rounded bg-zinc-900 border border-zinc-800 hover:border-zinc-700 transition-colors cursor-pointer group"
-          title={`First Frame: ${scene.firstFrameUrl ? "Generated" : "Pending"}`}
-        >
-          <div className="w-5 h-5 rounded overflow-hidden bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
-            {scene.firstFrameUrl ? (
-              <img src={scene.firstFrameUrl} alt="Frame" className="w-full h-full object-cover" />
-            ) : (
-              <ImageIcon className="w-3 h-3 text-zinc-500 group-hover:text-zinc-300" />
-            )}
-          </div>
-          <span className="text-[9px] font-mono text-zinc-400 truncate">Frame</span>
-        </div>
-
-        {/* Character asset pill */}
-        <div
-          onClick={(e) => {
-            e.stopPropagation();
-            if (onSelect) onSelect(scene);
-          }}
-          className="flex items-center gap-1.5 p-1 rounded bg-zinc-900 border border-zinc-800 hover:border-zinc-700 transition-colors cursor-pointer group"
-          title={`Character: ${charUrl ? "Anchored" : "Pending"}`}
-        >
-          <div className="w-5 h-5 rounded overflow-hidden bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
-            {charUrl ? (
+      {/* --- IMPLICITLY WIRED ASSET AVATAR BADGES --- */}
+      <div className="px-3 py-2 bg-zinc-950 border-t border-zinc-800/80 flex items-center justify-between gap-1.5 nodrag">
+        {/* Left: Wired Character Badges */}
+        <div className="flex items-center gap-1">
+          {charUrl ? (
+            <div
+              className="w-6 h-6 rounded-full border border-zinc-700 overflow-hidden bg-zinc-800 shrink-0"
+              title={primaryChar?.name || "Anchored Protagonist"}
+            >
               <img src={charUrl} alt="Character" className="w-full h-full object-cover" />
-            ) : (
-              <User className="w-3 h-3 text-zinc-500 group-hover:text-zinc-300" />
-            )}
-          </div>
-          <span className="text-[9px] font-mono text-zinc-400 truncate">Protagonist</span>
+            </div>
+          ) : (
+            <div className="w-6 h-6 rounded-full border border-dashed border-zinc-700 flex items-center justify-center text-zinc-600">
+              <User className="w-3 h-3" />
+            </div>
+          )}
+
+          {/* Background Plate Badge */}
+          {bgUrl ? (
+            <div
+              className="w-8 h-5 rounded border border-zinc-700 overflow-hidden bg-zinc-800 shrink-0"
+              title={wiredLocation?.name || "Anchored Location"}
+            >
+              <img src={bgUrl} alt="Location" className="w-full h-full object-cover" />
+            </div>
+          ) : (
+            <div className="w-8 h-5 rounded border border-dashed border-zinc-700 flex items-center justify-center text-zinc-600">
+              <Mountain className="w-3 h-3" />
+            </div>
+          )}
         </div>
 
-        {/* Environment asset pill */}
-        <div
-          onClick={(e) => {
-            e.stopPropagation();
-            if (onSelect) onSelect(scene);
-          }}
-          className="flex items-center gap-1.5 p-1 rounded bg-zinc-900 border border-zinc-800 hover:border-zinc-700 transition-colors cursor-pointer group"
-          title={`Environment: ${bgUrl ? "Set" : "Pending"}`}
-        >
-          <div className="w-5 h-5 rounded overflow-hidden bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
-            {bgUrl ? (
-              <img src={bgUrl} alt="Environment" className="w-full h-full object-cover" />
-            ) : (
-              <Mountain className="w-3 h-3 text-zinc-500 group-hover:text-zinc-300" />
-            )}
+        {/* Right: Takes variation switcher (if multiple takes exist) */}
+        {takes.length > 1 ? (
+          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+            <span className="text-[9px] font-mono text-zinc-500 uppercase">Takes:</span>
+            {takes.slice(0, 3).map((t) => (
+              <button
+                key={t.takeId}
+                onClick={() => onSelectTake && onSelectTake(scene.sceneId, t.takeId)}
+                className={`w-4 h-4 rounded text-[9px] font-mono flex items-center justify-center transition-colors ${
+                  t.takeId === activeTake?.takeId
+                    ? "bg-zinc-100 text-zinc-950 font-bold"
+                    : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                }`}
+                title={`Select Take ${t.takeNumber}`}
+              >
+                {t.takeNumber}
+              </button>
+            ))}
           </div>
-          <span className="text-[9px] font-mono text-zinc-400 truncate">Environment</span>
-        </div>
+        ) : (
+          <span className="text-[10px] font-mono text-zinc-500">
+            {primaryChar?.name ? primaryChar.name.split(" ")[0] : "Scene Beat"}
+          </span>
+        )}
       </div>
 
       {/* --- INLINE EDIT ACTION DELTA & INSPECTOR TRIGGER --- */}

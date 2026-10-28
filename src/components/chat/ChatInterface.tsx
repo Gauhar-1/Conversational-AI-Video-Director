@@ -135,6 +135,7 @@ export default function ChatInterface({ activeProjectId, onProjectCreated, onSto
 
   const { data: messages = [], isLoading: isProjectLoading } = useQuery<Message[]>({
     queryKey: ["chatMessages", activeProjectId || "draft"],
+    enabled: !!activeProjectId,
     queryFn: async () => {
       if (!activeProjectId) return [];
       const res = await fetch(`/api/projects/${activeProjectId}`);
@@ -381,6 +382,7 @@ export default function ChatInterface({ activeProjectId, onProjectCreated, onSto
 
             <textarea
               ref={textareaRef}
+              data-testid="chat-input"
               value={input}
               onChange={handleTextareaChange}
               onKeyDown={(e) => {
@@ -397,6 +399,7 @@ export default function ChatInterface({ activeProjectId, onProjectCreated, onSto
             {/* Submit Button: Stark white inversion when active, subtle ghost when disabled */}
             <button
               type="submit"
+              data-testid="chat-submit"
               disabled={!hasContent || mutation.isPending}
               className={`h-8 w-8 rounded-md flex items-center justify-center shrink-0 transition-colors ${
                 hasContent && !mutation.isPending

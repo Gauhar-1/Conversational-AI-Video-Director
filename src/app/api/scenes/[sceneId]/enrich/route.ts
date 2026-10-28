@@ -26,6 +26,26 @@ const CAMERA_FRAMING_MAP: Record<CameraAngle, { framing: string; motion: string 
     framing: "Over-the-shoulder tracking framing, cinematic foreground silhouette, deep perspective parallax",
     motion: "Dynamic over-the-shoulder dolly tracking forward following character trajectory",
   },
+  CLOSE_UP: {
+    framing: "Tight intimate close-up framing, sharp focal depth on emotional details",
+    motion: "Slow subtle cinematic push-in intensifying emotional weight",
+  },
+  MEDIUM_SHOT: {
+    framing: "Balanced medium waist-up framing capturing natural gesture and context",
+    motion: "Smooth horizontal tracking maintaining subject centering",
+  },
+  WIDE_SHOT: {
+    framing: "Expansive wide establishing shot showcasing environment and spatial scale",
+    motion: "Slow lateral sweep revealing environmental atmosphere",
+  },
+  EXTREME_CLOSE_UP: {
+    framing: "Choke macro framing focusing intensely on eyes or critical detail",
+    motion: "Micro-drift with ultra shallow depth of field",
+  },
+  ESTABLISHING: {
+    framing: "Grand panoramic master composition introducing spatial geography",
+    motion: "Majestic slow cinematic crane descent",
+  },
 };
 
 export async function POST(

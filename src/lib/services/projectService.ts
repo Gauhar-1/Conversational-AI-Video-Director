@@ -17,14 +17,11 @@ import {
 export class ProjectService {
   /**
    * Retrieves all projects belonging to the authenticated user.
-   * Restricts fields to _id, title, and updatedAt for high-speed sidebar rendering.
+   * Restricts fields to _id, title, currentStage, and counts for high-speed dashboard rendering.
    */
   static async getProjectsByUser(userId: string) {
-    await dbConnect();
-    return await Project.find({ userId })
-      .select("_id title updatedAt")
-      .sort({ updatedAt: -1 })
-      .lean();
+    const { projectRepository } = await import("@/lib/db/repositories/projectRepository");
+    return await projectRepository.getUserProjects(userId);
   }
 
   /**

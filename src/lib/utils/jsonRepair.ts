@@ -61,9 +61,8 @@ export function repairAndParseJson<T = any>(dirtyText: string): T {
     // Continue to structural repair
   }
 
-  // Pass 8: Balance truncated or unclosed brackets and braces
-  let openBraces = 0;
-  let openBrackets = 0;
+  // Pass 8: Balance truncated or unclosed brackets and braces with a LIFO stack
+  const stack: ("{" | "[")[] = [];
   let inString = false;
   let isEscaped = false;
 
@@ -78,10 +77,17 @@ export function repairAndParseJson<T = any>(dirtyText: string): T {
     if (char === '"' && !isEscaped) {
       inString = !inString;
     } else if (!inString) {
-      if (char === "{") openBraces++;
-      else if (char === "}") openBraces = Math.max(0, openBraces - 1);
-      else if (char === "[") openBrackets++;
-      else if (char === "]") openBrackets = Math.max(0, openBrackets - 1);
+      if (char === "{") {
+        stack.push("{");
+      } else if (char === "[") {
+        stack.push("[");
+      } else if (char === "}") {
+        const lastIdx = stack.lastIndexOf("{");
+        if (lastIdx !== -1) stack.splice(lastIdx, 1);
+      } else if (char === "]") {
+        const lastIdx = stack.lastIndexOf("[");
+        if (lastIdx !== -1) stack.splice(lastIdx, 1);
+      }
     }
 
     isEscaped = false;
@@ -95,14 +101,14 @@ export function repairAndParseJson<T = any>(dirtyText: string): T {
   // Remove any dangling trailing comma at the end before adding closers
   cleaned = cleaned.replace(/,\s*$/, "");
 
-  // Close remaining unclosed brackets and braces in LIFO order
-  while (openBrackets > 0) {
-    cleaned += "]";
-    openBrackets--;
-  }
-  while (openBraces > 0) {
-    cleaned += "}";
-    openBraces--;
+  // Close remaining unclosed brackets and braces in true LIFO order
+  while (stack.length > 0) {
+    const opener = stack.pop();
+    if (opener === "{") {
+      cleaned += "}";
+    } else if (opener === "[") {
+      cleaned += "]";
+    }
   }
 
   // Pass 9: Final JSON.parse attempt

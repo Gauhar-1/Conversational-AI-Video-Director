@@ -34,6 +34,7 @@ export function useStoryboard(activeProjectId: string | null) {
     storyboard: any[];
     scenes: ISceneDoc[];
     globalVault: IGlobalVault;
+    global_assets?: any;
   }>({
     queryKey: ["storyboardData", activeProjectId],
     queryFn: async () => {
@@ -44,6 +45,7 @@ export function useStoryboard(activeProjectId: string | null) {
           storyboard: EMPTY_SCENES,
           scenes: EMPTY_SCENES,
           globalVault: DEFAULT_GLOBAL_VAULT,
+          global_assets: { characters: [], locations: [] },
         };
       }
       const res = await fetch(`/api/projects/${activeProjectId}`);
@@ -56,6 +58,7 @@ export function useStoryboard(activeProjectId: string | null) {
   const storyboard = project?.storyboard || EMPTY_SCENES;
   const scenes = project?.scenes || EMPTY_SCENES;
   const globalVault = project?.globalVault || DEFAULT_GLOBAL_VAULT;
+  const globalAssets = project?.global_assets || { characters: [], locations: [] };
 
   // --- SERVER-SENT EVENTS (SSE) DELTA ENRICHMENT ---
   const enrichSceneDelta = useCallback(async (
@@ -506,10 +509,117 @@ export function useStoryboard(activeProjectId: string | null) {
     return generateSceneVideo(sceneId, prompt, selectedModel, advancedInputs);
   }, [generateSceneVideo]);
 
+  const selectTake = useCallback(async (sceneId: string, takeId: string) => {
+    if (!activeProjectId) return;
+    // Optimistic update
+    queryClient.setQueryData(["storyboardData", activeProjectId], (old: any) => {
+      if (!old || !old.scenes) return old;
+      return {
+        ...old,
+        scenes: old.scenes.map((s: ISceneDoc) => {
+          if (s.sceneId !== sceneId) return s;
+          const targetTake = s.takes?.find(t => t.takeId === takeId);
+          return {
+            ...s,
+            activeTakeId: takeId,
+            videoUrl: targetTake?.videoUrl || s.videoUrl
+          };
+        })
+      };
+    });
+
+    try {
+      const { setActiveTakeAction } = await import("@/actions/scenes");
+      await setActiveTakeAction(sceneId, takeId, activeProjectId);
+    } catch (err) {
+      console.error("Failed to set active take:", err);
+      queryClient.invalidateQueries({ queryKey: ["storyboardData", activeProjectId] });
+    }
+  }, [activeProjectId, queryClient]);
+
+  const deleteTake = useCallback(async (sceneId: string, takeId: string) => {
+    if (!activeProjectId) return;
+    // Optimistic update
+    queryClient.setQueryData(["storyboardData", activeProjectId], (old: any) => {
+      if (!old || !old.scenes) return old;
+      return {
+        ...old,
+        scenes: old.scenes.map((s: ISceneDoc) => {
+          if (s.sceneId !== sceneId) return s;
+          const remainingTakes = (s.takes || []).filter(t => t.takeId !== takeId);
+          return {
+            ...s,
+            takes: remainingTakes,
+            activeTakeId: s.activeTakeId === takeId ? remainingTakes[0]?.takeId || "" : s.activeTakeId,
+            videoUrl: s.activeTakeId === takeId ? remainingTakes[0]?.videoUrl || "" : s.videoUrl
+          };
+        })
+      };
+    });
+
+    try {
+      const { deleteTakeAction } = await import("@/actions/scenes");
+      await deleteTakeAction(sceneId, takeId, activeProjectId);
+    } catch (err) {
+      console.error("Failed to delete take:", err);
+      queryClient.invalidateQueries({ queryKey: ["storyboardData", activeProjectId] });
+    }
+  }, [activeProjectId, queryClient]);
+
+  // --- ITERATE & BRANCH (DUPLICATE STATE AS NEW TAKE, CLEAR PROMPT FOR TWEAKING) ---
+  const iterateTake = useCallback(async (sceneId: string) => {
+    if (!activeProjectId) return;
+    const targetScene = scenes.find((s) => s.sceneId === sceneId);
+    if (!targetScene) return;
+
+    const existingTakes = targetScene.takes || [];
+    const newTakeNumber = existingTakes.length + 1;
+    const newTakeId = `take-${Date.now()}`;
+
+    const newTake = {
+      takeId: newTakeId,
+      takeNumber: newTakeNumber,
+      videoUrl: "",
+      thumbnailUrl: targetScene.firstFrameUrl || "",
+      prompt: targetScene.motionPrompt || targetScene.imagePrompt || targetScene.rawDelta || "",
+      model: "kling-2.5",
+      status: "pending" as const,
+      duration: targetScene.duration || 10,
+      createdAt: new Date().toISOString(),
+    };
+
+    // Optimistically duplicate take state, keep old take videos in history, set new take active, and clear active prompt
+    queryClient.setQueryData(["storyboardData", activeProjectId], (old: any) => {
+      if (!old || !old.scenes) return old;
+      return {
+        ...old,
+        scenes: old.scenes.map((s: ISceneDoc) => {
+          if (s.sceneId !== sceneId) return s;
+          return {
+            ...s,
+            takes: [...(s.takes || []), newTake],
+            activeTakeId: newTakeId,
+            videoUrl: "", // Clear active video for new take
+            rawDelta: "", // Clear active intent prompt for safe tweaking
+          };
+        }),
+      };
+    });
+
+    try {
+      const { addTakeAction } = await import("@/actions/scenes");
+      await addTakeAction(sceneId, { prompt: newTake.prompt, takeNumber: newTakeNumber }, activeProjectId);
+    } catch (err) {
+      console.error("Failed to branch new take:", err);
+      queryClient.invalidateQueries({ queryKey: ["storyboardData", activeProjectId] });
+    }
+  }, [activeProjectId, scenes, queryClient]);
+
   return {
     project,
     scenes,
     globalVault,
+    globalAssets,
     storyboard,
     isLoading: isLoading || (isFetching && scenes.length === 0 && storyboard.length === 0),
     enrichingScenes,
@@ -517,6 +627,9 @@ export function useStoryboard(activeProjectId: string | null) {
     enrichSceneDelta,
     updateScene,
     updateVault,
+    selectTake,
+    deleteTake,
+    iterateTake,
     generateSceneFrame,
     generateSceneCharacter,
     generateSceneBackground,

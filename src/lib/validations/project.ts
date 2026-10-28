@@ -1,22 +1,49 @@
 /**
  * @file src/lib/validations/project.ts
- * @description Zod Schemas for Project, Vault, and Scene validation following Interface Segregation.
+ * @description Zod Schemas for Project, Global Assets, Scenes, and Projections.
+ * Strict typing across the 4-stage progressive disclosure pipeline:
+ * 1. Writer's Room -> 2. Casting/Scouting Wizard -> 3. Auto-Wired Timeline -> 4. Export Engine.
  */
 
 import { z } from "zod";
+import {
+  globalAssetsSchema,
+  characterAssetSchema,
+  locationAssetSchema,
+  type GlobalAssets,
+  type CharacterAsset,
+  type LocationAsset,
+} from "./asset";
+import {
+  sceneDocSchema,
+  cameraAngleSchema,
+  cameraMovementSchema,
+  sceneStatusSchema,
+  takeSchema,
+  type SceneDoc,
+  type CameraAngle,
+  type CameraMovement,
+  type SceneStatus,
+  type Take,
+} from "./scene";
 
-export const cameraAngleSchema = z.enum(["CAM_A_CENTER", "CAM_B_45_CLOSE", "CAM_C_OTS"]);
-export type CameraAngleType = z.infer<typeof cameraAngleSchema>;
+// Re-export asset & scene schemas for convenience
+export * from "./asset";
+export * from "./scene";
 
-export const sceneStatusSchema = z.enum([
-  "idle",
-  "enriching",
-  "ready",
-  "generating",
-  "completed",
-  "failed",
+// --- PROJECT STAGES ---
+export const projectStageSchema = z.enum([
+  "writers_room",
+  "casting_scouting",
+  "timeline",
+  "export",
 ]);
-export type SceneStatusType = z.infer<typeof sceneStatusSchema>;
+export type ProjectStage = z.infer<typeof projectStageSchema>;
+
+// --- ENUMS & LEGACY ANCHORS ---
+export type CameraAngleType = CameraAngle;
+export type SceneStatusType = SceneStatus;
+export type SceneDocType = SceneDoc;
 
 export const DEFAULT_CHARACTER_ANCHOR = {
   description: "Lead protagonist with cinematic detailing",
@@ -42,8 +69,10 @@ export const environmentAnchorSchema = z.object({
   lightingProfile: z.string().default(DEFAULT_ENVIRONMENT_ANCHOR.lightingProfile),
 });
 
-export const aspectRatioSchema = z.enum(["9:16", "16:9"]).default("9:16");
+export const aspectRatioSchema = z.enum(["9:16", "16:9", "1:1"]).default("9:16");
+export type AspectRatio = z.infer<typeof aspectRatioSchema>;
 
+// Legacy Global Vault schema for backward compatibility
 export const globalVaultSchema = z.object({
   characterAnchor: characterAnchorSchema.default(DEFAULT_CHARACTER_ANCHOR),
   environmentAnchor: environmentAnchorSchema.default(DEFAULT_ENVIRONMENT_ANCHOR),
@@ -51,23 +80,78 @@ export const globalVaultSchema = z.object({
 });
 export type GlobalVaultType = z.infer<typeof globalVaultSchema>;
 
-export const sceneDocSchema = z.object({
-  sceneId: z.string().min(1, "sceneId is required"),
-  order: z.number().int().nonnegative().default(1),
-  duration: z.number().positive().default(10),
-  cameraAngle: cameraAngleSchema.default("CAM_A_CENTER"),
-  rawDelta: z.string().default(""),
-  imagePrompt: z.string().default(""),
-  motionPrompt: z.string().default(""),
-  firstFrameUrl: z.string().default(""),
-  lastFrameUrl: z.string().default(""),
-  videoUrl: z.string().default(""),
-  status: sceneStatusSchema.default("idle"),
+// --- CHAT & SCRIPT ---
+export const chatMessageSchema = z.object({
+  role: z.enum(["user", "assistant", "system"]),
+  content: z.string(),
+  timestamp: z.string().default(() => new Date().toISOString()),
 });
-export type SceneDocType = z.infer<typeof sceneDocSchema>;
+export type ChatMessage = z.infer<typeof chatMessageSchema>;
+
+// --- EXPORT CONFIG ---
+export const exportConfigSchema = z.object({
+  fcpxmlVersion: z.string().default("1.9"),
+  frameRate: z.number().int().positive().default(24),
+  resolution: z
+    .object({
+      width: z.number().int().positive().default(1080),
+      height: z.number().int().positive().default(1920),
+    })
+    .default({ width: 1080, height: 1920 }),
+});
+export type ExportConfig = z.infer<typeof exportConfigSchema>;
+
+// --- FULL PROJECT DOCUMENT SCHEMA ---
+export const projectDocSchema = z.object({
+  _id: z.string(),
+  userId: z.string().uuid().or(z.string().min(1)),
+  title: z.string().trim().min(1).max(120).default("Untitled Project"),
+  currentStage: projectStageSchema.default("writers_room"),
+  aspectRatio: aspectRatioSchema.default("9:16"),
+  scriptContent: z.string().default(""),
+  global_assets: globalAssetsSchema.default({ characters: [], locations: [] }),
+  // Legacy globalVault retained for seamless backward compatibility
+  globalVault: globalVaultSchema.optional(),
+  scenes: z.array(sceneDocSchema).default([]),
+  chatHistory: z.array(chatMessageSchema).default([]),
+  exportConfig: exportConfigSchema.default({
+    fcpxmlVersion: "1.9",
+    frameRate: 24,
+    resolution: { width: 1080, height: 1920 },
+  }),
+  visualMetadata: z.record(z.string(), z.any()).optional().default({}),
+  createdAt: z.union([z.date(), z.string()]),
+  updatedAt: z.union([z.date(), z.string()]),
+});
+export type ProjectDoc = z.infer<typeof projectDocSchema>;
+
+// --- MONGOOSE PROJECTION: DASHBOARD PROJECT SUMMARY ---
+/**
+ * Ultra-lean projection for /dashboard grid.
+ * Strictly excludes heavy scenes and base64 payloads to minimize bandwidth and memory.
+ */
+export const projectSummarySchema = z.object({
+  _id: z.string(),
+  userId: z.string(),
+  title: z.string(),
+  currentStage: projectStageSchema.default("writers_room"),
+  aspectRatio: aspectRatioSchema.default("9:16"),
+  sceneCount: z.number().int().nonnegative().default(0),
+  characterCount: z.number().int().nonnegative().default(0),
+  locationCount: z.number().int().nonnegative().default(0),
+  updatedAt: z.union([z.date(), z.string()]),
+  createdAt: z.union([z.date(), z.string()]),
+});
+export type ProjectSummary = z.infer<typeof projectSummarySchema>;
+
+// --- MUTATION SCHEMAS ---
 
 export const createProjectSchema = z.object({
   title: z.string().trim().min(1).max(120).default("New Project"),
+  aspectRatio: aspectRatioSchema.optional().default("9:16"),
+  scriptContent: z.string().optional().default(""),
+  currentStage: projectStageSchema.optional().default("writers_room"),
+  global_assets: globalAssetsSchema.optional(),
   globalVault: globalVaultSchema.optional(),
   scenes: z.array(sceneDocSchema).optional(),
 });
@@ -75,8 +159,13 @@ export type CreateProjectType = z.infer<typeof createProjectSchema>;
 
 export const updateProjectSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
+  currentStage: projectStageSchema.optional(),
+  aspectRatio: aspectRatioSchema.optional(),
+  scriptContent: z.string().optional(),
+  global_assets: globalAssetsSchema.partial().optional(),
   globalVault: globalVaultSchema.partial().optional(),
   scenes: z.array(sceneDocSchema).optional(),
+  exportConfig: exportConfigSchema.partial().optional(),
 });
 export type UpdateProjectType = z.infer<typeof updateProjectSchema>;
 

@@ -1,13 +1,22 @@
 "use client";
 
+/**
+ * @file src/app/project/[id]/pipeline/page.tsx
+ * @description Stage 3: The Auto-Wired Timeline workspace.
+ * Renders a strict horizontal, non-branching timeline of SceneMacroNodes on React Flow.
+ * Chat interface disappears completely.
+ * Enhanced with StageHeader and Takes variation management.
+ */
+
 import { use, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { 
-  ArrowLeft, FileText, Settings, Layers, 
+  FileText, Settings, Layers, 
   ArrowRight, Sparkles, Loader2, GitCommit, Film 
 } from "lucide-react";
+import { StageHeader } from "@/components/navigation/StageHeader";
 import StoryboardCanvas from "@/components/storyboard/StoryboardGrid";
 import SettingsModal from "@/components/settings/SettingsModal";
 
@@ -47,6 +56,7 @@ export default function PipelineWorkspacePage({
         imagePrompt: "[CAM_A_CENTER]: 9:16 cinematic master shot introducing the protagonist with dramatic volumetric lighting",
         motionPrompt: "Locked static center tracking shot with stable vertical composition",
         status: "ready" as const,
+        takes: [],
       };
 
       const res = await fetch(`/api/projects/${id}`, {
@@ -73,62 +83,28 @@ export default function PipelineWorkspacePage({
 
   return (
     <div className="flex flex-col h-screen w-screen bg-zinc-950 text-zinc-100 select-none overflow-hidden">
-      {/* Top Header: strictly border-b border-zinc-800 */}
-      <header className="h-14 border-b border-zinc-800 bg-zinc-950 px-4 md:px-6 flex items-center justify-between shrink-0 z-20">
-        {/* Left: Navigation and Breadcrumb */}
-        <div className="flex items-center gap-3">
-          <Link
-            href="/dashboard"
-            className="w-8 h-8 rounded-md border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 flex items-center justify-center transition-colors"
-            title="Back to Dashboard"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </Link>
-
-          <div className="h-4 w-px bg-zinc-800" />
-
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-mono text-zinc-500 uppercase tracking-wider">
-              Node Pipeline
-            </span>
-            <span className="text-zinc-600">/</span>
-            <span className="text-sm font-semibold text-zinc-200 tracking-tight line-clamp-1 max-w-[200px] md:max-w-xs">
-              {isLoading ? "Loading..." : project?.title || "Untitled Sequence"}
-            </span>
-          </div>
-        </div>
-
-        {/* Right: Switch back to Writer's Room & Settings */}
-        <div className="flex items-center gap-2.5">
-          {/* Link back to Writer's Room Script */}
-          <Link
-            href={`/project/${id}/script`}
-            className="h-8 px-3 rounded-md bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 text-xs font-medium flex items-center gap-1.5 transition-colors"
-          >
-            <FileText className="w-3.5 h-3.5 text-zinc-400" />
-            <span>Writer&apos;s Room</span>
-          </Link>
-
-          <button
-            onClick={() => setIsSettingsOpen(true)}
-            className="w-8 h-8 rounded-md border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 flex items-center justify-center transition-colors"
-            title="Settings"
-          >
-            <Settings className="w-4 h-4" />
-          </button>
-        </div>
-      </header>
+      {/* Studio Stage Stepper Navigation Header */}
+      <StageHeader
+        projectId={id}
+        projectTitle={isLoading ? "Loading..." : project?.title || "Untitled Sequence"}
+        activeStage="timeline"
+        sceneCount={scenesCount}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        nextAction={{
+          label: "Export & Master",
+          href: `/project/${id}/export`,
+        }}
+      />
 
       {/* Main Area: Render Canvas or Uninitialized Stage Gate */}
       <main className="flex-1 w-full h-[calc(100vh-3.5rem)] relative overflow-hidden bg-zinc-950">
         {isLoading ? (
-          <div className="w-full h-full flex items-center justify-center">
-            <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
+          <div className="w-full h-full flex items-center justify-center text-zinc-500 font-mono text-xs">
+            <Loader2 className="w-6 h-6 animate-spin text-zinc-500 mb-2" />
           </div>
         ) : isPipelineEmpty ? (
           /* Empty / Uninitialized Stage Gate Page */
           <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center select-none relative">
-            {/* Subtle geometric dot grid background */}
             <div className="absolute inset-0 bg-[linear-gradient(to_right,#27272a15_1px,transparent_1px),linear-gradient(to_bottom,#27272a15_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none" />
 
             <div className="relative z-10 max-w-md w-full p-8 rounded-md bg-zinc-900 border border-zinc-800 shadow-2xl backdrop-blur-md">
@@ -138,15 +114,15 @@ export default function PipelineWorkspacePage({
 
               <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-zinc-950 border border-zinc-800 text-[10px] font-mono uppercase tracking-wider text-zinc-400 mb-3">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500/80" />
-                <span>Stage 01: Uninitialized</span>
+                <span>Timeline Uninitialized</span>
               </div>
 
               <h2 className="text-lg font-semibold text-zinc-100 tracking-tight mb-2">
-                Pipeline Not Initialized
+                Timeline Has No Scenes
               </h2>
 
               <p className="text-xs text-zinc-400 leading-relaxed mb-6">
-                This sequence has no storyboard nodes generated yet. Head to the Writer&apos;s Room to direct your screenplay with the AI director, or commit a starter sequence stage below.
+                Direct your screenplay in the Writer&apos;s Room or commit a starter sequence stage below.
               </p>
 
               <div className="space-y-2.5">
