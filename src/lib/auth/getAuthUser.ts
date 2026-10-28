@@ -79,15 +79,19 @@ export async function getAuthUser(req?: Request): Promise<AuthContext> {
     }
   }
 
-  // 4. Test environment bypass for isolated route/controller tests
-  if (process.env.NODE_ENV === "test") {
+  // 4. Test or Local Development environment fallback
+  // In development (or test), if no Supabase session or custom header is present,
+  // fall back gracefully to DEV_DEFAULT_USER_ID (or DEV_USER_ID from .env.local).
+  if (process.env.NODE_ENV !== "production") {
+    const devUserId = process.env.DEV_USER_ID || DEV_DEFAULT_USER_ID;
     return {
-      userId: DEV_DEFAULT_USER_ID,
+      userId: devUserId,
+      email: "director-dev@studio.local",
       isAuthenticated: true,
     };
   }
 
-  // 5. Fallback for unauthenticated access
+  // 5. Fallback for unauthenticated access in production
   return {
     userId: "",
     isAuthenticated: false,

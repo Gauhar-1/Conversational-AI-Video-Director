@@ -47,3 +47,4 @@ export function VideoPlayerSkeleton() {
 }
 
 export default VideoPlayerSkeleton;
+

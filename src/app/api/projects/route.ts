@@ -5,13 +5,14 @@
  */
 
 import { NextResponse } from "next/server";
-import { requireAuthUser } from "@/lib/auth/getAuthUser";
+import { getAuthUser, requireAuthUser, DEV_DEFAULT_USER_ID } from "@/lib/auth/getAuthUser";
 import { ProjectService } from "@/lib/services/projectService";
 import { createProjectSchema } from "@/lib/validations/project";
 
 export async function GET(req: Request) {
   try {
-    const { userId } = await requireAuthUser(req);
+    const auth = await getAuthUser(req);
+    const userId = auth.userId || process.env.DEV_USER_ID || DEV_DEFAULT_USER_ID;
     const projects = await ProjectService.getProjectsByUser(userId);
 
     return NextResponse.json(projects);

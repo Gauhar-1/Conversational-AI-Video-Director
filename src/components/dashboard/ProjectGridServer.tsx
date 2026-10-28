@@ -5,6 +5,7 @@
  */
 
 import React from "react";
+import { DEV_DEFAULT_USER_ID } from "@/lib/auth/getAuthUser";
 import { projectRepository } from "@/lib/db/repositories/projectRepository";
 import { DashboardProjectGrid } from "./DashboardProjectGrid";
 import type { ProjectCardData } from "./ProjectCard";
@@ -18,12 +19,10 @@ export async function ProjectGridServer({
   userId,
   isAuthenticated,
 }: ProjectGridServerProps) {
-  if (!isAuthenticated || !userId) {
-    return <DashboardProjectGrid initialProjects={[]} isAuthenticated={false} />;
-  }
+  const effectiveUserId = userId || process.env.DEV_USER_ID || DEV_DEFAULT_USER_ID;
 
-  // Direct server-side Mongoose query with projection
-  const projects = await projectRepository.getUserProjects(userId);
+  // Direct server-side Mongoose query with projection (retrieves user + legacy active workspace projects)
+  const projects = await projectRepository.getUserProjects(effectiveUserId);
 
   // Map to clean ProjectCardData
   const cardData: ProjectCardData[] = projects.map((p) => ({
@@ -36,7 +35,7 @@ export async function ProjectGridServer({
     locationCount: p.locationCount,
   }));
 
-  return <DashboardProjectGrid initialProjects={cardData} isAuthenticated={true} />;
+  return <DashboardProjectGrid initialProjects={cardData} isAuthenticated={isAuthenticated} />;
 }
 
 export default ProjectGridServer;

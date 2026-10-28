@@ -147,3 +147,4 @@ export function CanvasSkeleton() {
 }
 
 export default CanvasSkeleton;
+
