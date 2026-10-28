@@ -9,16 +9,19 @@
  */
 
 import React, { useState } from "react";
+import Image from "next/image";
 import { 
   User, Sparkles, CheckCircle2, 
   Loader2, Edit3, Check, Trash2, ArrowRight
 } from "lucide-react";
 import type { CharacterAsset } from "@/lib/validations/project";
+import { useDebouncedCallback } from "@/lib/hooks/useDebounce";
 
 interface CharacterCardProps {
   character: CharacterAsset;
   onGenerate: (character: CharacterAsset, newPrompt?: string, seed?: number) => Promise<void>;
   onApprove: (assetId: string, approvedImageUrl: string) => Promise<void>;
+  onSavePrompt?: (assetId: string, prompt: string) => Promise<void>;
   onDelete?: (assetId: string) => Promise<void>;
   isGenerating?: boolean;
 }
@@ -27,6 +30,7 @@ export const CharacterCard = React.memo(function CharacterCard({
   character,
   onGenerate,
   onApprove,
+  onSavePrompt,
   onDelete,
   isGenerating = false,
 }: CharacterCardProps) {
@@ -35,6 +39,27 @@ export const CharacterCard = React.memo(function CharacterCard({
   const [currentSeed, setCurrentSeed] = useState(character.pulidSeed || 42);
   const [selectedImageUrl, setSelectedImageUrl] = useState(character.imageUrl);
   const [isEnriching, setIsEnriching] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+
+  // 1000ms Debounced Auto-Save: avoids database thrashing while user types
+  const debouncedSave = useDebouncedCallback(async (val: string) => {
+    if (!onSavePrompt || val === character.appearancePrompt) return;
+    setSaveStatus("saving");
+    try {
+      await onSavePrompt(character.assetId, val);
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 2000);
+    } catch (err) {
+      console.error("Auto-save prompt failed:", err);
+      setSaveStatus("idle");
+    }
+  }, 1000);
+
+  const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setEditedPrompt(val);
+    debouncedSave(val);
+  };
 
   const isApproved = character.status === "approved";
   const displayImage = selectedImageUrl || character.imageUrl;
@@ -82,10 +107,13 @@ export const CharacterCard = React.memo(function CharacterCard({
       {/* Visual Reference Showcase (1:1 Ratio for Headshot/Portrait Sheet) */}
       <div className="relative aspect-square w-full bg-zinc-950 flex items-center justify-center overflow-hidden border-b border-zinc-800">
         {displayImage ? (
-          <img
+          <Image
             src={displayImage}
             alt={character.name}
-            className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
+            fill
+            sizes="(max-width: 768px) 100vw, 320px"
+            className="object-cover transition-transform duration-300 hover:scale-105"
+            unoptimized={displayImage.startsWith("data:")}
           />
         ) : (
           <div className="flex flex-col items-center justify-center text-zinc-600 gap-2 p-4 text-center">
@@ -152,12 +180,12 @@ export const CharacterCard = React.memo(function CharacterCard({
               <div className="space-y-2">
                 <textarea
                   value={editedPrompt}
-                  onChange={(e) => setEditedPrompt(e.target.value)}
+                  onChange={handlePromptChange}
                   className="w-full min-h-[160px] p-4 text-sm leading-relaxed resize-y bg-zinc-900 border border-zinc-700 rounded-md text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-zinc-500 overflow-y-auto custom-scrollbar font-sans"
                   placeholder="Paste or write detailed appearance conditioning prompt..."
                 />
                 
-                {/* Enrichment Action Directly Below Textarea */}
+                {/* Enrichment Action Directly Below Textarea & Auto-save Status */}
                 <div className="flex items-center justify-between gap-2 pt-1">
                   <button
                     type="button"
@@ -178,7 +206,21 @@ export const CharacterCard = React.memo(function CharacterCard({
                     )}
                   </button>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-2">
+                    {/* 1000ms Debounce visual feedback */}
+                    {saveStatus === "saving" && (
+                      <span className="text-[10px] font-mono text-zinc-400 flex items-center gap-1">
+                        <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                        <span>Saving...</span>
+                      </span>
+                    )}
+                    {saveStatus === "saved" && (
+                      <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
+                        <Check className="w-2.5 h-2.5" />
+                        <span>Saved</span>
+                      </span>
+                    )}
+
                     <button
                       type="button"
                       onClick={() => setIsEditingPrompt(false)}

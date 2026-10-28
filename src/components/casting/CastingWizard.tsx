@@ -23,6 +23,8 @@ import {
   generateLocationAssetAction,
   approveLocationAssetAction,
   deleteLocationAssetAction,
+  updateCharacterPromptAction,
+  updateLocationPromptAction,
 } from "@/actions/assets";
 
 interface CastingWizardProps {
@@ -366,6 +368,9 @@ export function CastingWizard({
                   character={char}
                   onGenerate={handleGenerateCharacter}
                   onApprove={handleApproveCharacter}
+                  onSavePrompt={async (assetId, prompt) => {
+                    await updateCharacterPromptAction(projectId, assetId, prompt);
+                  }}
                   onDelete={handleDeleteCharacter}
                   isGenerating={generatingId === char.assetId}
                 />
@@ -394,6 +399,9 @@ export function CastingWizard({
                 location={loc}
                 onGenerate={handleGenerateLocation}
                 onApprove={handleApproveLocation}
+                onSavePrompt={async (assetId, prompt, lighting) => {
+                  await updateLocationPromptAction(projectId, assetId, prompt, lighting);
+                }}
                 onDelete={handleDeleteLocation}
                 isGenerating={generatingId === loc.assetId}
               />

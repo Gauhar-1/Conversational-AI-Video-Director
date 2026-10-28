@@ -8,7 +8,7 @@
  * Fully optimized with React.memo() and monochromatic zinc design tokens.
  */
 
-import { memo, useState, useEffect } from "react";
+import { memo, useState, useEffect, useOptimistic, useTransition } from "react";
 import { Handle, Position, NodeProps } from "@xyflow/react";
 import { CameraAngle, ISceneDoc, IGlobalAssetsDoc, ITakeDoc } from "@/models/Project";
 import { 
@@ -80,23 +80,32 @@ export const SceneMacroNode = memo(({ data, selected }: NodeProps) => {
     setCurrentAngle(scene.cameraAngle || "CAM_A_CENTER");
   }, [scene.cameraAngle]);
 
+  const [isPending, startTransition] = useTransition();
+  const [optimisticAngle, setOptimisticAngle] = useOptimistic(
+    currentAngle,
+    (_curr, next: CameraAngle) => next
+  );
+
   const handleAngleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     e.stopPropagation();
     const newAngle = e.target.value as CameraAngle;
     setCurrentAngle(newAngle);
-    if (onUpdateAngle) {
-      onUpdateAngle(scene.sceneId, newAngle);
-    }
+    startTransition(() => {
+      setOptimisticAngle(newAngle);
+      if (onUpdateAngle) {
+        onUpdateAngle(scene.sceneId, newAngle);
+      }
+    });
   };
 
   const handleEnrichClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (onEnrichDelta) {
-      onEnrichDelta(scene.sceneId, deltaInput, currentAngle);
+      onEnrichDelta(scene.sceneId, deltaInput, optimisticAngle);
     }
   };
 
-  const angleConfig = ANGLE_LABELS[currentAngle] || ANGLE_LABELS.CAM_A_CENTER;
+  const angleConfig = ANGLE_LABELS[optimisticAngle] || ANGLE_LABELS.CAM_A_CENTER;
   const isGenerating = scene.status === "generating";
   const isEnrichingState = isEnriching || scene.status === "enriching";
 
@@ -135,7 +144,7 @@ export const SceneMacroNode = memo(({ data, selected }: NodeProps) => {
         {/* Camera Angle Selector Dropdown */}
         <div className="relative" onClick={(e) => e.stopPropagation()}>
           <select
-            value={currentAngle}
+            value={optimisticAngle}
             onChange={handleAngleChange}
             className={`text-[11px] font-mono font-medium pl-2 pr-6 py-0.5 rounded border appearance-none outline-none cursor-pointer transition-colors ${angleConfig.badge}`}
           >

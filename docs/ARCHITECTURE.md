@@ -342,6 +342,35 @@ In React Flow Cluster Graph view (`viewMode === "graph"`), nodes are arranged in
 *   **`BackgroundNode` (288px wide):** Centered horizontally below `VideoNode` at `(baseX + 466, centerY + 640)`, providing 100px vertical clearance.
 *   **Horizontal Inter-Cluster Clearance:** Leaves 450px of clean runway between consecutive scenes, preventing any node collisions as production assets expand.
 
+---
+
+## 13. Rendering Optimization, Micro-Payloads & Zero-Latency Architecture
+
+To guarantee desktop-grade performance on low-end devices and high-latency networks, the application enforces the following rendering protocols:
+
+### 13.1. Server Component Fetching & Hydration Flicker Elimination
+*   **Server Component Fetching:** The `/dashboard` route executes directly inside a Next.js Server Component (`src/app/dashboard/page.tsx`), fetching the user's project portfolio before streaming HTML. Client-side `useEffect` delay and empty-state flashing are eliminated.
+*   **Granular Suspense:** The project grid is enclosed in a `<Suspense fallback={<ProjectGridSkeleton />}>` boundary.
+*   **Zero-CLS Skeleton Matching:** `<ProjectGridSkeleton />` renders an exact 8-card grid with pulsing zinc placeholders matching the exact height (`min-h-[190px]`), padding (`p-5`), borders, and internal layout of `<ProjectCard />`, ensuring zero Cumulative Layout Shift when data resolves.
+
+### 13.2. Micro-Payloads via Strict Mongoose Projections
+*   Database reads for `/dashboard` invoke `.select('_id userId title thumbnailUrl currentStage aspectRatio scenes.sceneId global_assets.characters.assetId global_assets.locations.assetId updatedAt createdAt').lean()`.
+*   Heavy nested `scenes`, `takes`, narrative prompts, `globalVault`, and base64 images are stripped at the database tier.
+*   Total dashboard payload size is kept strictly under 5KB regardless of how many scenes exist within projects.
+
+### 13.3. Lazy-Loading Heavy Engines for Low-End Devices
+*   **React Flow Pipeline Canvas:** Loaded dynamically using Next.js `next/dynamic` with `ssr: false` and a matching `<CanvasSkeleton />` fallback. Low-end device browsers avoid downloading and parsing the heavy node graph bundle until the user enters `/pipeline`.
+*   **Sequential Video Player:** Docked player on Stage 4 (`/export`) is dynamically imported with `<VideoPlayerSkeleton />`, preventing video decode context overhead from blocking initial page readiness.
+
+### 13.4. Next.js `<Image />` Optimization & 1000ms Debounced Auto-Save
+*   **Automated WebP Delivery:** Character and location asset cards utilize Next.js `<Image fill ... />`, serving optimized WebP formats sized precisely to display dimensions and lazy-loading only when scrolled into view.
+*   **1000ms Debounce Guard:** Script and Casting wizards implement the custom `useDebounce` and `useDebouncedCallback` hooks (`/lib/hooks/useDebounce.ts`). Rapid keystrokes remain 100% fluid in memory, firing MongoDB update mutations only after 1000ms of user silence.
+
+### 13.5. Optimistic UI (Zero-Latency Illusion)
+*   **React 19 `useOptimistic`:** Visual updates for project creation, camera framing adjustments (`NodeInspector`, `SceneMacroNode`), and take deletions apply synchronously to local React state before Server Actions resolve.
+*   **Subtle Error Rollback:** If a network failure occurs, the state rolls back automatically while surfacing a non-blocking toast banner.
+
+
 
 
 

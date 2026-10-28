@@ -11,7 +11,7 @@
  * Monochromatic zinc studio design system.
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useOptimistic, useTransition } from "react";
 import Link from "next/link";
 import { ISceneDoc, IGlobalVault, CameraAngle } from "@/models/Project";
 import { 
@@ -86,10 +86,28 @@ export function NodeInspector({
   const [cameraAngle, setCameraAngle] = useState<CameraAngle>(scene.cameraAngle || "CAM_A_CENTER");
   const [selectedVideoModel, setSelectedVideoModel] = useState("kling-2.5");
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // React 19 useOptimistic: Zero-Latency Camera Framing & Takes Deletion
+  const [optimisticCameraAngle, setOptimisticCameraAngle] = useOptimistic(
+    cameraAngle,
+    (_current, newAngle: CameraAngle) => newAngle
+  );
+
+  const [optimisticTakes, setOptimisticTakes] = useOptimistic(
+    scene.takes || [],
+    (currentTakes, action: { type: "delete"; takeId: string }) => {
+      if (action.type === "delete") {
+        return currentTakes.filter((t) => t.takeId !== action.takeId);
+      }
+      return currentTakes;
+    }
+  );
 
   const sceneNumber = (scene as any).sceneNumber || scene.order || 1;
   const sceneDuration = scene.duration || (scene as any).durationSec || 10;
-  const takeCount = scene.takes?.length || 0;
+  const takeCount = optimisticTakes.length;
 
   // Determine active video status
   const activeTake = scene.takes?.find((t) => t.takeId === scene.activeTakeId) || scene.takes?.[0];
@@ -195,6 +213,32 @@ export function NodeInspector({
       startFrameUrl: scene.firstFrameUrl || activeFrameUrl,
       characterReferenceUrls: assignedCharacter?.imageUrl ? [assignedCharacter.imageUrl] : [],
       backgroundReferenceUrl: assignedLocation?.imageUrl || undefined,
+    });
+  };
+
+  const handleAngleSwitch = (angle: CameraAngle) => {
+    setCameraAngle(angle);
+    setErrorMessage(null);
+    startTransition(async () => {
+      setOptimisticCameraAngle(angle);
+      try {
+        await onEnrichDelta(scene.sceneId, rawDelta, angle);
+      } catch (err: any) {
+        setErrorMessage("Failed to update camera framing.");
+      }
+    });
+  };
+
+  const handleDeleteTakeOptimistic = (targetSceneId: string, takeId: string) => {
+    if (!onDeleteTake) return;
+    setErrorMessage(null);
+    startTransition(async () => {
+      setOptimisticTakes({ type: "delete", takeId });
+      try {
+        await onDeleteTake(targetSceneId, takeId);
+      } catch (err: any) {
+        setErrorMessage("Failed to delete take.");
+      }
     });
   };
 
@@ -358,6 +402,22 @@ export function NodeInspector({
 
       {/* --- BODY SCROLLABLE --- */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
+        {/* Subtle Optimistic Error Toast */}
+        {errorMessage && (
+          <div className="p-2.5 bg-red-950/80 border border-red-800 rounded-md flex items-center justify-between text-xs text-red-200">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+            <button
+              onClick={() => setErrorMessage(null)}
+              className="text-red-400 hover:text-white"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+
         {/* Token Efficiency Status Banner */}
         {lastTokenResult && (
           <div className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-md flex items-center justify-between text-xs font-mono">
@@ -445,7 +505,7 @@ export function NodeInspector({
               </button>
             </div>
 
-            {(!scene.takes || scene.takes.length === 0) ? (
+            {(!optimisticTakes || optimisticTakes.length === 0) ? (
               <div className="p-5 text-center bg-zinc-900/60 border border-dashed border-zinc-800 rounded-md">
                 <Video className="w-6 h-6 text-zinc-600 mx-auto mb-2" />
                 <p className="text-xs text-zinc-400 font-mono mb-1">No Takes Recorded Yet</p>
@@ -461,7 +521,7 @@ export function NodeInspector({
               </div>
             ) : (
               <div className="space-y-3">
-                {scene.takes.map((take, idx) => {
+                {optimisticTakes.map((take, idx) => {
                   const isActive = take.takeId === scene.activeTakeId || (!scene.activeTakeId && idx === 0);
                   const takeNumber = (take as any).takeNumber || idx + 1;
                   return (
@@ -489,7 +549,7 @@ export function NodeInspector({
                         </div>
                         {onDeleteTake && (
                           <button
-                            onClick={() => onDeleteTake(scene.sceneId, take.takeId)}
+                            onClick={() => handleDeleteTakeOptimistic(scene.sceneId, take.takeId)}
                             className="text-zinc-500 hover:text-zinc-300 p-1"
                             title="Delete this take"
                           >
@@ -712,12 +772,9 @@ export function NodeInspector({
                 {(["CAM_A_CENTER", "CAM_B_45_CLOSE", "CAM_C_OTS"] as CameraAngle[]).map((angle) => (
                   <button
                     key={angle}
-                    onClick={() => {
-                      setCameraAngle(angle);
-                      onEnrichDelta(scene.sceneId, rawDelta, angle);
-                    }}
+                    onClick={() => handleAngleSwitch(angle)}
                     className={`py-1.5 px-1 rounded-md text-[10px] font-mono font-medium border transition-colors ${
-                      cameraAngle === angle
+                      optimisticCameraAngle === angle
                         ? "bg-zinc-100 text-zinc-950 border-zinc-100 font-semibold"
                         : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"
                     }`}

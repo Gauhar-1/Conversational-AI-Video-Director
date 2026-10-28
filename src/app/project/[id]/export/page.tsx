@@ -21,7 +21,17 @@ import { StageHeader } from "@/components/navigation/StageHeader";
 import SettingsModal from "@/components/settings/SettingsModal";
 import { compileFCPXML, downloadFCPXML } from "@/lib/fcpxml";
 import { FCPXMLExportWizard } from "@/components/export/FCPXMLExportWizard";
+import { VideoPlayerSkeleton } from "@/components/export/VideoPlayerSkeleton";
+import dynamic from "next/dynamic";
 import type { ISceneDoc } from "@/models/Project";
+
+const DynamicVideoPlayer = dynamic(
+  () => import("@/components/export/SequentialVideoPlayer"),
+  {
+    ssr: false,
+    loading: () => <VideoPlayerSkeleton />,
+  }
+);
 
 export default function ExportWorkspacePage({
   params,
@@ -190,138 +200,26 @@ export default function ExportWorkspacePage({
 
       {/* Main Playback & Export Engine Studio */}
       <main className="flex-1 flex flex-col lg:flex-row overflow-hidden bg-zinc-950">
-        {/* Left / Center: Docked Sequential Video Player */}
-        <div className="flex-1 flex flex-col justify-between p-6 overflow-hidden border-b lg:border-b-0 lg:border-r border-zinc-800">
-          {/* Main Stage Display (9:16 Cinema Player) */}
-          <div className="flex-1 flex items-center justify-center relative min-h-0 py-2">
-            <div className="relative aspect-[9/16] h-full max-h-[620px] bg-zinc-900 rounded-md overflow-hidden border border-zinc-800 shadow-2xl flex items-center justify-center group">
-              {currentScene?.videoUrl ? (
-                <video
-                  ref={videoRef}
-                  key={currentScene.videoUrl}
-                  src={currentScene.videoUrl}
-                  className="w-full h-full object-cover"
-                  autoPlay={isPlaying}
-                  muted={isMuted}
-                  playsInline
-                  onEnded={handleVideoEnded}
-                />
-              ) : currentScene?.firstFrameUrl ? (
-                <div className="w-full h-full relative">
-                  <img
-                    src={currentScene.firstFrameUrl}
-                    alt={currentScene.title}
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center p-4 text-center">
-                    <Film className="w-8 h-8 text-zinc-400 mb-2" />
-                    <span className="text-xs font-mono text-zinc-200">Keyframe Staged</span>
-                    <span className="text-[10px] text-zinc-400">Video clip pending execution</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center text-zinc-600 p-6 text-center">
-                  <Film className="w-12 h-12 stroke-[1.2] text-zinc-700 mb-2" />
-                  <span className="text-xs font-mono text-zinc-400">Scene {currentIndex + 1} Empty</span>
-                </div>
-              )}
-
-              {/* Watermarks */}
-              <div className="absolute top-3 left-3 px-2 py-0.5 rounded bg-zinc-950/80 border border-zinc-800 text-[10px] font-mono text-zinc-300">
-                SCENE {String(currentIndex + 1).padStart(2, "0")} / {playableScenes.length}
-              </div>
-
-              {currentScene?.takeNumber && (
-                <div className="absolute top-3 right-3 px-2 py-0.5 rounded bg-zinc-950/80 border border-zinc-800 text-[10px] font-mono text-zinc-300">
-                  Take {currentScene.takeNumber} • {currentScene.model}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Sequential Playback Controls Bar */}
-          <div className="mt-4 p-3 bg-zinc-900 border border-zinc-800 rounded-md flex flex-col gap-3">
-            {/* Scrubber Timeline Strip */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
-              {playableScenes.map((scene, idx) => {
-                const isSelected = idx === currentIndex;
-                const hasVideo = Boolean(scene.videoUrl);
-
-                return (
-                  <button
-                    key={scene.sceneId}
-                    onClick={() => {
-                      setCurrentIndex(idx);
-                      setIsPlaying(true);
-                    }}
-                    className={`h-9 px-3 rounded text-[11px] font-mono flex items-center gap-1.5 shrink-0 border transition-all ${
-                      isSelected
-                        ? "bg-zinc-100 text-zinc-950 font-bold border-white shadow-sm"
-                        : hasVideo
-                        ? "bg-zinc-950 text-zinc-300 border-zinc-700 hover:border-zinc-500"
-                        : "bg-zinc-950/50 text-zinc-600 border-zinc-800"
-                    }`}
-                  >
-                    <span>{idx + 1}</span>
-                    <span className="truncate max-w-[80px]">
-                      {scene.title || `Scene ${idx + 1}`}
-                    </span>
-                    {hasVideo && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Playback Buttons */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handlePrev}
-                  disabled={currentIndex === 0}
-                  className="w-8 h-8 rounded bg-zinc-950 border border-zinc-800 hover:bg-zinc-800 text-zinc-300 disabled:opacity-40 flex items-center justify-center transition-colors"
-                  title="Previous Scene"
-                >
-                  <SkipBack className="w-4 h-4" />
-                </button>
-
-                <button
-                  onClick={togglePlay}
-                  className="w-9 h-9 rounded bg-zinc-100 hover:bg-white text-zinc-950 flex items-center justify-center font-semibold shadow-sm transition-colors"
-                  title={isPlaying ? "Pause" : "Play Sequential Timeline"}
-                >
-                  {isPlaying ? (
-                    <Pause className="w-4 h-4" />
-                  ) : (
-                    <Play className="w-4 h-4 ml-0.5" />
-                  )}
-                </button>
-
-                <button
-                  onClick={handleNext}
-                  disabled={currentIndex >= playableScenes.length - 1}
-                  className="w-8 h-8 rounded bg-zinc-950 border border-zinc-800 hover:bg-zinc-800 text-zinc-300 disabled:opacity-40 flex items-center justify-center transition-colors"
-                  title="Next Scene"
-                >
-                  <SkipForward className="w-4 h-4" />
-                </button>
-
-                <span className="text-xs font-mono text-zinc-400 ml-2">
-                  {currentScene ? `${currentScene.duration}s • ${currentScene.cameraAngle}` : "0s"}
-                </span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setIsMuted(!isMuted)}
-                  className="w-8 h-8 rounded bg-zinc-950 border border-zinc-800 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 flex items-center justify-center transition-colors"
-                  title={isMuted ? "Unmute" : "Mute"}
-                >
-                  {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* Left / Center: Docked Sequential Video Player (Dynamically loaded with zero CLS skeleton) */}
+        {isLoading ? (
+          <VideoPlayerSkeleton />
+        ) : (
+          <DynamicVideoPlayer
+            playableScenes={playableScenes}
+            currentIndex={currentIndex}
+            onSelectScene={(idx) => {
+              setCurrentIndex(idx);
+              setIsPlaying(true);
+            }}
+            isPlaying={isPlaying}
+            onTogglePlay={togglePlay}
+            isMuted={isMuted}
+            onToggleMute={() => setIsMuted(!isMuted)}
+            onPrev={handlePrev}
+            onNext={handleNext}
+            onVideoEnded={handleVideoEnded}
+          />
+        )}
 
         {/* Right: Export & Master Panel */}
         <div className="w-full lg:w-96 p-6 flex flex-col justify-between space-y-6 overflow-y-auto custom-scrollbar">

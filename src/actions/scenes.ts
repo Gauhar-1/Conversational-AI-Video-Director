@@ -196,6 +196,20 @@ export async function deleteTakeAction(
   return success;
 }
 
+export async function deleteSceneAction(
+  projectId: string,
+  sceneId: string
+) {
+  const { userId, isAuthenticated } = await getAuthUser();
+  if (!isAuthenticated || !userId) {
+    throw new Error("Unauthorized: Session required.");
+  }
+
+  const success = await sceneRepository.deleteScene(userId, projectId, sceneId);
+  revalidatePath(`/project/${projectId}/pipeline`);
+  return success;
+}
+
 export async function reorderScenesAction(
   projectId: string,
   orders: { sceneId: string; order: number }[]

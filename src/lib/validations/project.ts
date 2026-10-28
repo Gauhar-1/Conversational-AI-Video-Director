@@ -134,6 +134,8 @@ export const projectSummarySchema = z.object({
   _id: z.string(),
   userId: z.string(),
   title: z.string(),
+  thumbnail: z.string().optional(),
+  thumbnailUrl: z.string().optional(),
   currentStage: projectStageSchema.default("writers_room"),
   aspectRatio: aspectRatioSchema.default("9:16"),
   sceneCount: z.number().int().nonnegative().default(0),
@@ -155,7 +157,8 @@ export const createProjectSchema = z.object({
   globalVault: globalVaultSchema.optional(),
   scenes: z.array(sceneDocSchema).optional(),
 });
-export type CreateProjectType = z.infer<typeof createProjectSchema>;
+export type CreateProjectType = z.input<typeof createProjectSchema>;
+export type CreateProjectOutput = z.infer<typeof createProjectSchema>;
 
 export const updateProjectSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),

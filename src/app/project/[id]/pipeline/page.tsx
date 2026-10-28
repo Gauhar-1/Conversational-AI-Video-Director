@@ -16,9 +16,20 @@ import {
   FileText, Settings, Layers, 
   ArrowRight, Sparkles, Loader2, GitCommit, Film 
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import { StageHeader } from "@/components/navigation/StageHeader";
-import StoryboardCanvas from "@/components/storyboard/StoryboardGrid";
+import { CanvasSkeleton } from "@/components/storyboard/CanvasSkeleton";
 import SettingsModal from "@/components/settings/SettingsModal";
+
+// Dynamic import with ssr: false ensures React Flow and WebGL bundles
+// are lazily fetched only when the user enters the pipeline stage
+const PipelineCanvas = dynamic(
+  () => import("@/components/storyboard/StoryboardGrid"),
+  {
+    ssr: false,
+    loading: () => <CanvasSkeleton />,
+  }
+);
 
 export default function PipelineWorkspacePage({
   params,
@@ -99,9 +110,7 @@ export default function PipelineWorkspacePage({
       {/* Main Area: Render Canvas or Uninitialized Stage Gate */}
       <main className="flex-1 w-full h-[calc(100vh-3.5rem)] relative overflow-hidden bg-zinc-950">
         {isLoading ? (
-          <div className="w-full h-full flex items-center justify-center text-zinc-500 font-mono text-xs">
-            <Loader2 className="w-6 h-6 animate-spin text-zinc-500 mb-2" />
-          </div>
+          <CanvasSkeleton />
         ) : isPipelineEmpty ? (
           /* Empty / Uninitialized Stage Gate Page */
           <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center select-none relative">
@@ -158,8 +167,8 @@ export default function PipelineWorkspacePage({
             </div>
           </div>
         ) : (
-          /* Active Node Canvas */
-          <StoryboardCanvas activeProjectId={id} isExpanded={true} />
+          /* Active Node Canvas (Dynamically loaded for low-end device optimization) */
+          <PipelineCanvas activeProjectId={id} isExpanded={true} />
         )}
       </main>
 

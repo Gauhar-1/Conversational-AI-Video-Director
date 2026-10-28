@@ -79,7 +79,14 @@ export class ProjectService {
   static async createProject(userId: string, input?: CreateProjectType): Promise<IProject> {
     return await withMongoTransaction(async (session) => {
       const defaultScenes: ISceneDoc[] = input?.scenes && input.scenes.length > 0
-        ? input.scenes
+        ? input.scenes.map((s, idx) => ({
+            ...s,
+            order: s.order || idx + 1,
+            duration: s.duration || 10,
+            cameraAngle: s.cameraAngle || "CAM_A_CENTER",
+            status: s.status || "idle",
+            takes: s.takes || [],
+          })) as ISceneDoc[]
         : [
             {
               sceneId: "scene-1",

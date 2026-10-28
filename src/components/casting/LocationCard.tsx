@@ -9,16 +9,19 @@
  */
 
 import React, { useState } from "react";
+import Image from "next/image";
 import { 
   Mountain, Sparkles, CheckCircle2, 
   Loader2, Edit3, Check, Trash2 
 } from "lucide-react";
 import type { LocationAsset } from "@/lib/validations/project";
+import { useDebouncedCallback } from "@/lib/hooks/useDebounce";
 
 interface LocationCardProps {
   location: LocationAsset;
   onGenerate: (location: LocationAsset, newPrompt?: string, lightingProfile?: string) => Promise<void>;
   onApprove: (assetId: string, approvedImageUrl: string) => Promise<void>;
+  onSavePrompt?: (assetId: string, prompt: string, lighting?: string) => Promise<void>;
   onDelete?: (assetId: string) => Promise<void>;
   isGenerating?: boolean;
 }
@@ -27,6 +30,7 @@ export const LocationCard = React.memo(function LocationCard({
   location,
   onGenerate,
   onApprove,
+  onSavePrompt,
   onDelete,
   isGenerating = false,
 }: LocationCardProps) {
@@ -35,6 +39,33 @@ export const LocationCard = React.memo(function LocationCard({
   const [editedLighting, setEditedLighting] = useState(location.lightingProfile || "Cinematic atmospheric lighting");
   const [selectedImageUrl, setSelectedImageUrl] = useState(location.imageUrl);
   const [isEnriching, setIsEnriching] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
+
+  // 1000ms Debounced Auto-Save: only syncs to MongoDB when user pauses typing
+  const debouncedSave = useDebouncedCallback(async (newPrompt: string, newLighting: string) => {
+    if (!onSavePrompt || (newPrompt === location.environmentPrompt && newLighting === location.lightingProfile)) return;
+    setSaveStatus("saving");
+    try {
+      await onSavePrompt(location.assetId, newPrompt, newLighting);
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 2000);
+    } catch (err) {
+      console.error("Auto-save location prompt failed:", err);
+      setSaveStatus("idle");
+    }
+  }, 1000);
+
+  const handlePromptChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setEditedPrompt(val);
+    debouncedSave(val, editedLighting);
+  };
+
+  const handleLightingChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setEditedLighting(val);
+    debouncedSave(editedPrompt, val);
+  };
 
   const isApproved = location.status === "approved";
   const displayImage = selectedImageUrl || location.imageUrl;
@@ -82,10 +113,13 @@ export const LocationCard = React.memo(function LocationCard({
       {/* 16:9 Landscape Ratio Showcase */}
       <div className="relative aspect-video w-full bg-zinc-950 flex items-center justify-center overflow-hidden border-b border-zinc-800">
         {displayImage ? (
-          <img
+          <Image
             src={displayImage}
             alt={location.name}
-            className="w-full h-full object-cover transition-transform duration-300 hover:scale-105"
+            fill
+            sizes="(max-width: 768px) 100vw, 450px"
+            className="object-cover transition-transform duration-300 hover:scale-105"
+            unoptimized={displayImage.startsWith("data:")}
           />
         ) : (
           <div className="flex flex-col items-center justify-center text-zinc-600 gap-2 p-4 text-center">
@@ -157,7 +191,7 @@ export const LocationCard = React.memo(function LocationCard({
               <div className="space-y-2">
                 <textarea
                   value={editedPrompt}
-                  onChange={(e) => setEditedPrompt(e.target.value)}
+                  onChange={handlePromptChange}
                   className="w-full min-h-[160px] p-4 text-sm leading-relaxed resize-y bg-zinc-900 border border-zinc-700 rounded-md text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-zinc-500 overflow-y-auto custom-scrollbar font-sans"
                   placeholder="Paste or write detailed environment prompt..."
                 />
@@ -183,7 +217,21 @@ export const LocationCard = React.memo(function LocationCard({
                     )}
                   </button>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-2">
+                    {/* 1000ms Debounce visual feedback */}
+                    {saveStatus === "saving" && (
+                      <span className="text-[10px] font-mono text-zinc-400 flex items-center gap-1">
+                        <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                        <span>Saving...</span>
+                      </span>
+                    )}
+                    {saveStatus === "saved" && (
+                      <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
+                        <Check className="w-2.5 h-2.5" />
+                        <span>Saved</span>
+                      </span>
+                    )}
+
                     <button
                       type="button"
                       onClick={() => setIsEditingPrompt(false)}
@@ -201,7 +249,7 @@ export const LocationCard = React.memo(function LocationCard({
                   <input
                     type="text"
                     value={editedLighting}
-                    onChange={(e) => setEditedLighting(e.target.value)}
+                    onChange={handleLightingChange}
                     className="w-full bg-zinc-950 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 outline-none focus:border-zinc-500"
                     placeholder="Lighting profile..."
                   />

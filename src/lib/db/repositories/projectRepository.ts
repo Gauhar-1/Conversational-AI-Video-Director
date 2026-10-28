@@ -25,7 +25,7 @@ export class ProjectRepository implements IProjectRepository {
 
     const projects = await Project.find({ userId })
       .select(
-        "_id userId title currentStage aspectRatio scenes.sceneId global_assets.characters.assetId global_assets.locations.assetId updatedAt createdAt"
+        "_id userId title thumbnailUrl currentStage aspectRatio scenes.sceneId global_assets.characters.assetId global_assets.locations.assetId updatedAt createdAt"
       )
       .sort({ updatedAt: -1 })
       .lean();
@@ -34,6 +34,8 @@ export class ProjectRepository implements IProjectRepository {
       _id: p._id.toString(),
       userId: p.userId,
       title: p.title || "Untitled Project",
+      thumbnail: p.thumbnailUrl || p.thumbnail || "",
+      thumbnailUrl: p.thumbnailUrl || p.thumbnail || "",
       currentStage: (p.currentStage as ProjectStage) || "writers_room",
       aspectRatio: p.aspectRatio || "9:16",
       sceneCount: Array.isArray(p.scenes) ? p.scenes.length : 0,

@@ -204,6 +204,43 @@ export async function deleteLocationAssetAction(
   return success;
 }
 
+export async function updateCharacterPromptAction(
+  projectId: string,
+  assetId: string,
+  prompt: string
+) {
+  const { userId, isAuthenticated } = await getAuthUser();
+  if (!isAuthenticated || !userId) {
+    throw new Error("Unauthorized: Session required.");
+  }
+
+  const updated = await assetRepository.updateCharacter(userId, projectId, assetId, {
+    appearancePrompt: prompt,
+  });
+  revalidatePath(`/project/${projectId}/casting`);
+  return JSON.parse(JSON.stringify(updated));
+}
+
+export async function updateLocationPromptAction(
+  projectId: string,
+  assetId: string,
+  prompt: string,
+  lightingProfile?: string
+) {
+  const { userId, isAuthenticated } = await getAuthUser();
+  if (!isAuthenticated || !userId) {
+    throw new Error("Unauthorized: Session required.");
+  }
+
+  const updated = await assetRepository.updateLocation(userId, projectId, assetId, {
+    environmentPrompt: prompt,
+    ...(lightingProfile ? { lightingProfile } : {}),
+  });
+  revalidatePath(`/project/${projectId}/casting`);
+  return JSON.parse(JSON.stringify(updated));
+}
+
+
 export async function enrichPromptAction(
   prompt: string,
   type: "character" | "location" | "scene" = "scene",

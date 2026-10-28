@@ -300,7 +300,7 @@ export default function StoryboardCanvas({
         clusterNodes.push({
           id: videoNodeId,
           type: "videoNode",
-          position: { x: baseX + 420, y: centerY },
+          position: { x: baseX + 420, y: centerY + 140 },
           data: {
             scene: { ...scene, scene_number: scene.order, video_prompt: scene.motionPrompt || sbItem?.video_prompt },
             prompt: scene.motionPrompt || sbItem?.video_prompt || scene.rawDelta,
