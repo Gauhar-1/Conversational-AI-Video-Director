@@ -69,7 +69,7 @@ export async function POST(req: Request) {
     }
 
     let activeChatModel = "openai/gpt-oss-20b";
-    if (chatModel && chatModel.trim() !== "" && !chatModel.includes("meta/") && !chatModel.includes("nvidia")) {
+    if (chatModel && typeof chatModel === "string" && chatModel.trim() !== "") {
       activeChatModel = chatModel.trim();
     }
 
@@ -82,7 +82,7 @@ export async function POST(req: Request) {
         baseURL: "https://api.groq.com/openai/v1",
       });
 
-      // Stream with Vercel AI SDK
+      // Stream with Vercel AI SDK (temperature: 0.3 for deterministic, tool-free narrative)
       const result = streamText({
         model: groqProvider(activeChatModel),
         system: CULTURAL_STORYTELLER_PROMPT,
@@ -91,7 +91,7 @@ export async function POST(req: Request) {
           content: m.content,
         })),
         maxTokens: 4000,
-        temperature: 0.7,
+        temperature: 0.3,
         onError: ({ error }) => {
           console.error("[api/chat] Groq streamText error:", error);
         },

@@ -35,6 +35,14 @@ function getClientGroqKey(): string {
   );
 }
 
+/**
+ * Retrieves preferred Groq model from client settings.
+ */
+function getClientChatModel(): string {
+  if (typeof window === "undefined") return "openai/gpt-oss-20b";
+  return localStorage.getItem("director_chat_model") || "openai/gpt-oss-20b";
+}
+
 export function useWritersRoom({
   projectId,
   initialChatHistory = [],
@@ -73,6 +81,7 @@ export function useWritersRoom({
   }, [initialChatHistory]);
 
   const initialClientKey = getClientGroqKey();
+  const initialClientModel = getClientChatModel();
 
   // Vercel AI SDK useChat with BYOK headers and body payload
   const {
@@ -96,6 +105,7 @@ export function useWritersRoom({
     body: {
       projectId,
       apiKey: initialClientKey,
+      chatModel: initialClientModel,
     },
     initialMessages: formattedInitialMessages,
     onResponse: () => {
@@ -175,6 +185,7 @@ export function useWritersRoom({
       }`;
 
       const activeKey = getClientGroqKey();
+      const activeModel = getClientChatModel();
       await append(
         {
           role: "user",
@@ -187,6 +198,7 @@ export function useWritersRoom({
           body: {
             projectId,
             apiKey: activeKey,
+            chatModel: activeModel,
           },
         }
       );
@@ -202,6 +214,7 @@ export function useWritersRoom({
       setIsStreamFinished(false);
 
       const activeKey = getClientGroqKey();
+      const activeModel = getClientChatModel();
       baseHandleSubmit(e, {
         headers: activeKey
           ? { "x-groq-key": activeKey, Authorization: `Bearer ${activeKey}` }
@@ -209,6 +222,7 @@ export function useWritersRoom({
         body: {
           projectId,
           apiKey: activeKey,
+          chatModel: activeModel,
         },
       });
     },

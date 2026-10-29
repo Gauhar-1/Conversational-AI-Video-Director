@@ -11,12 +11,14 @@ type SettingsModalProps = {
 export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [groqKey, setGroqKey] = useState("");
   const [replicateKey, setReplicateKey] = useState("");
+  const [chatModel, setChatModel] = useState("openai/gpt-oss-20b");
   const [isSaved, setIsSaved] = useState(false);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       setGroqKey(localStorage.getItem("director_groq_key") || "");
       setReplicateKey(localStorage.getItem("director_replicate_key") || "");
+      setChatModel(localStorage.getItem("director_chat_model") || "openai/gpt-oss-20b");
     }
   }, [isOpen]);
 
@@ -24,6 +26,7 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     if (typeof window !== "undefined") {
       localStorage.setItem("director_groq_key", groqKey.trim());
       localStorage.setItem("director_replicate_key", replicateKey.trim());
+      localStorage.setItem("director_chat_model", chatModel);
       setIsSaved(true);
       setTimeout(() => {
         setIsSaved(false);
@@ -84,6 +87,19 @@ export default function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 placeholder="gsk_..."
                 className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700 font-mono"
               />
+            </div>
+
+            <div className="space-y-1.5 pt-1">
+              <label className="text-[10px] font-mono uppercase tracking-wider text-zinc-500">Director Brain Model</label>
+              <select
+                value={chatModel}
+                onChange={(e) => setChatModel(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-md px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-zinc-700 font-mono"
+              >
+                <option value="openai/gpt-oss-20b">openai/gpt-oss-20b (OpenAI MoE Reasoning 20B)</option>
+                <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile (Meta Llama 3.3 70B - High Reliability)</option>
+                <option value="llama-3.1-8b-instant">llama-3.1-8b-instant (Meta Llama 3.1 8B - Instant)</option>
+              </select>
             </div>
           </div>
 
