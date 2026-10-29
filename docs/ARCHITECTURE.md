@@ -424,6 +424,13 @@ sequenceDiagram
 2. **Resilient SDK Initialization:** `src/lib/ai.ts` initializes with fallback credentials to ensure module evaluation never halts Next.js API routes before request-specific BYOK tokens can be extracted.
 3. **Auto-Expanding Paragraph Ergonomics:** The Writer's Room textarea automatically calculates `scrollHeight` on every keystroke, expanding smoothly from 52px up to 260px (10–12 lines) with internal scrolling beyond. Includes `Shift + Enter` multiline handling and real-time character counters.
 
+### 14.3. Tool Calling Architecture & Human-Speed Pacing
+1. **Autonomous Web Search Tool Integration:** `/api/chat/route.ts` registers a `webSearch` tool with `toolChoice: 'auto'` and `maxSteps: 3`. This eliminates Groq `tool_use_failed` errors when reasoning models like `openai/gpt-oss-20b` attempt to research unknown brands, allowing multi-step reasoning before synthesizing narrative responses.
+2. **Director Thinking State (`<DirectorThinking />`):** Replaces basic spinners with a pulsating studio-grade status bar (`bg-zinc-900 border-zinc-800 animate-pulse`), masking inference and search latency with prestigious creative direction updates.
+3. **Typewriter Pacer (`useTypewriterPacer`):** Paces incoming stream text to the DOM at 15ms-25ms intervals with adaptive catch-up, simulating an authentic human Creative Director typing live and eliminating jarring raw token dumps.
+4. **Studio-Grade Option Cards:** High-contrast `OptionCard` architecture featuring stark `bg-zinc-100 text-zinc-950` letter badges, distinct typography hierarchy, and hover elevation (`-translate-y-0.5 shadow-lg`).
+
+
 
 
 

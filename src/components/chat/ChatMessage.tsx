@@ -12,6 +12,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { OptionCard } from "./OptionCard";
 import { ParsedOption } from "@/lib/utils/chatParser";
+import { useTypewriterPacer } from "@/hooks/useTypewriterPacer";
 import { Sparkles, User, CheckCircle2 } from "lucide-react";
 
 export interface ParsedMessageItem {
@@ -38,6 +39,15 @@ export const ChatMessage = memo(function ChatMessage({
   onSelectOption,
 }: ChatMessageProps) {
   const isUser = message.role === "user";
+
+  // Human-speed typewriter pacing for streaming assistant narrative
+  const isActivelyStreaming = !isUser && isLatestAssistantMessage && areOptionsLocked;
+  const { displayedText } = useTypewriterPacer(message.narrativeText, {
+    enabled: isActivelyStreaming,
+    speedMs: 18,
+  });
+
+  const narrativeToRender = isActivelyStreaming ? displayedText : message.narrativeText;
 
   // -------------------------------------------------------------
   // USER MESSAGE PRESENTATION: Subtle, clean, right-aligned card
@@ -70,8 +80,8 @@ export const ChatMessage = memo(function ChatMessage({
   // -------------------------------------------------------------
   return (
     <div className="w-full my-6 text-left animate-in fade-in duration-300">
-      {/* Narrative Storytelling Prose */}
-      {message.narrativeText && (
+      {/* Narrative Storytelling Prose with Paced Typewriter Delivery */}
+      {narrativeToRender && (
         <div className="prose prose-invert max-w-none text-sm md:text-[15px] leading-relaxed text-zinc-300">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
@@ -106,7 +116,7 @@ export const ChatMessage = memo(function ChatMessage({
               ),
             }}
           >
-            {message.narrativeText}
+            {narrativeToRender}
           </ReactMarkdown>
         </div>
       )}

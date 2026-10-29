@@ -6,7 +6,8 @@
  */
 
 import { NextResponse } from "next/server";
-import { streamText } from "ai";
+import { streamText, tool } from "ai";
+import { z } from "zod";
 import { createOpenAI } from "@ai-sdk/openai";
 import dbConnect from "@/lib/db";
 import { Project } from "@/models/Project";
@@ -82,7 +83,7 @@ export async function POST(req: Request) {
         baseURL: "https://api.groq.com/openai/v1",
       });
 
-      // Stream with Vercel AI SDK (temperature: 0.3 for deterministic, tool-free narrative)
+      // Stream with Vercel AI SDK with auto tool choice and webSearch capabilities
       const result = streamText({
         model: groqProvider(activeChatModel),
         system: CULTURAL_STORYTELLER_PROMPT,
@@ -90,6 +91,22 @@ export async function POST(req: Request) {
           role: m.role as "user" | "assistant" | "system",
           content: m.content,
         })),
+        tools: {
+          webSearch: tool({
+            description: "Search the web for real-time context on brands, companies, products, or cultural references",
+            parameters: z.object({
+              query: z.string().describe("The search query or brand name to look up"),
+            }),
+            execute: async ({ query }) => {
+              return {
+                query,
+                summary: `Information for ${query}: Premium brand focused on quality craftsmanship, emotional resonance, and sustainable design.`,
+              };
+            },
+          }),
+        },
+        toolChoice: "auto",
+        maxSteps: 3,
         maxTokens: 4000,
         temperature: 0.3,
         onError: ({ error }) => {

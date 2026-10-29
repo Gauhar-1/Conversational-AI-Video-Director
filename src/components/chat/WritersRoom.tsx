@@ -10,6 +10,7 @@
 import React, { useRef, useEffect, useCallback, useState } from "react";
 import { useWritersRoom } from "@/hooks/useWritersRoom";
 import { ChatMessage } from "./ChatMessage";
+import { DirectorThinking } from "./DirectorThinking";
 import { Send, Loader2, Sparkles, Film, ArrowRight, AlertCircle, CornerDownLeft, Key } from "lucide-react";
 
 interface WritersRoomProps {
@@ -138,13 +139,12 @@ export function WritersRoom({ projectId, initialChatHistory = [] }: WritersRoomP
             />
           ))}
 
-          {/* Streaming Indicator */}
-          {isLoading && latestAssistantIndex === -1 && (
-            <div className="flex items-center gap-2 text-xs font-mono text-zinc-500 my-4 animate-pulse">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              <span>Creative Director composing...</span>
-            </div>
-          )}
+          {/* Director Thinking & Conceptualizing State */}
+          {isLoading &&
+            (latestAssistantIndex === -1 ||
+              !parsedMessages[latestAssistantIndex]?.narrativeText) && (
+              <DirectorThinking statusText="Director is conceptualizing the narrative..." />
+            )}
 
           {/* BYOK Groq API Key Missing Notice */}
           {!hasGroqKey && (
