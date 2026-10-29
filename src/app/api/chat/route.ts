@@ -80,21 +80,6 @@ export async function POST(req: Request) {
       const groqProvider = createOpenAI({
         apiKey: userApiKey || "test-key",
         baseURL: "https://api.groq.com/openai/v1",
-        fetch: async (url, options) => {
-          // Ensure reasoning_format: "raw" is passed to Groq so reasoning tokens
-          // are emitted in delta.content instead of delta.reasoning_content
-          if (options?.body && typeof options.body === "string") {
-            try {
-              const parsed = JSON.parse(options.body);
-              parsed.reasoning_format = "raw";
-              options = {
-                ...options,
-                body: JSON.stringify(parsed),
-              };
-            } catch {}
-          }
-          return fetch(url, options);
-        },
       });
 
       // Stream with Vercel AI SDK
@@ -105,15 +90,17 @@ export async function POST(req: Request) {
           role: m.role as "user" | "assistant" | "system",
           content: m.content,
         })),
+        maxTokens: 4000,
         temperature: 0.7,
         onError: ({ error }) => {
           console.error("[api/chat] Groq streamText error:", error);
         },
-        onFinish: async ({ text }) => {
+        onFinish: async ({ text, reasoning }) => {
           try {
             // Strip any internal thought tags before persisting
-            const cleanText = text
-              ? text
+            const rawOutput = text || reasoning || "";
+            const cleanText = rawOutput
+              ? rawOutput
                   .replace(/<think>[\s\S]*?<\/think>/gi, "")
                   .replace(/<think>[\s\S]*$/gi, "")
                   .trim()

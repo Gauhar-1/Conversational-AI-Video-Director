@@ -107,7 +107,8 @@ export function useWritersRoom({
       setIsStreamFinished(true);
 
       // Check for JSON Finale payload upon stream completion
-      const parsed = parseChatResponse(message.content);
+      const rawText = message.content || (message as any).reasoning || "";
+      const parsed = parseChatResponse(rawText);
       if (parsed.hasJsonPayload && parsed.jsonPayload && !hasInterceptedRef.current) {
         hasInterceptedRef.current = true;
         await handlePipelineCompilation(parsed.jsonPayload);
@@ -147,7 +148,8 @@ export function useWritersRoom({
 
     const lastMessage = messages[messages.length - 1];
     if (lastMessage.role === "assistant") {
-      const parsed = parseChatResponse(lastMessage.content);
+      const rawText = lastMessage.content || (lastMessage as any).reasoning || "";
+      const parsed = parseChatResponse(rawText);
       if (parsed.isJsonComplete && parsed.jsonPayload) {
         hasInterceptedRef.current = true;
         handlePipelineCompilation(parsed.jsonPayload);
@@ -216,11 +218,12 @@ export function useWritersRoom({
   // Parsed representation of messages with decoupled narrative & option cards
   const parsedMessages = useMemo(() => {
     return messages.map((m) => {
-      const parsed: ParsedChatResponse = parseChatResponse(m.content);
+      const rawText = m.content || (m as any).reasoning || "";
+      const parsed: ParsedChatResponse = parseChatResponse(rawText);
       return {
         id: m.id,
         role: m.role,
-        rawContent: m.content,
+        rawContent: rawText,
         narrativeText: parsed.narrativeText,
         options: parsed.options,
         hasOptions: parsed.hasOptions,
