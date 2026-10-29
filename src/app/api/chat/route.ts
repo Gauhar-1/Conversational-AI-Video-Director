@@ -17,15 +17,28 @@ import { repairAndParseJson } from "@/lib/utils/jsonRepair";
 
 export async function POST(req: Request) {
   try {
+    const body = await req.json().catch(() => ({}));
+    const { projectId, content, messages, imageBase64, chatModel, apiKey, groqApiKey } = body;
+
     // ---------------------------------------------------------
     // 1. BYOK INTERCEPTION & CLIENT SETUP (GROQ)
+    // Resolves key from Headers (x-groq-key, Authorization) or Request Body (apiKey, groqApiKey)
     // ---------------------------------------------------------
     const authHeader = req.headers?.get ? req.headers.get("authorization") : null;
+    const xGroqKey = req.headers?.get
+      ? req.headers.get("x-groq-key") || req.headers.get("X-Groq-Key")
+      : null;
+
     let userApiKey = "";
-    if (authHeader && authHeader.startsWith("Bearer ")) {
+    if (xGroqKey && xGroqKey.trim()) {
+      userApiKey = xGroqKey.trim();
+    } else if (authHeader && authHeader.startsWith("Bearer ")) {
       userApiKey = authHeader.split("Bearer ")[1].trim();
-    }
-    if (!userApiKey) {
+    } else if (apiKey && typeof apiKey === "string" && apiKey.trim()) {
+      userApiKey = apiKey.trim();
+    } else if (groqApiKey && typeof groqApiKey === "string" && groqApiKey.trim()) {
+      userApiKey = groqApiKey.trim();
+    } else {
       userApiKey = process.env.GROQ_API_KEY || "";
     }
 
@@ -43,9 +56,6 @@ export async function POST(req: Request) {
     if (!isAuthenticated || !userId) {
       return NextResponse.json({ error: "Unauthorized: Valid access token required." }, { status: 401 });
     }
-
-    const body = await req.json().catch(() => ({}));
-    const { projectId, content, messages, imageBase64, chatModel } = body;
 
     if (!projectId) {
       return NextResponse.json({ error: "Missing projectId" }, { status: 400 });

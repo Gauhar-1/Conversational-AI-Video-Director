@@ -23,6 +23,18 @@ export interface UseWritersRoomProps {
   onPipelineCompiled?: (project: any) => void;
 }
 
+/**
+ * Retrieves client-side BYOK Groq key stored in the user's browser.
+ */
+function getClientGroqKey(): string {
+  if (typeof window === "undefined") return "";
+  return (
+    localStorage.getItem("director_groq_key") ||
+    localStorage.getItem("groq_api_key") ||
+    ""
+  );
+}
+
 export function useWritersRoom({
   projectId,
   initialChatHistory = [],
@@ -60,7 +72,9 @@ export function useWritersRoom({
     ];
   }, [initialChatHistory]);
 
-  // Vercel AI SDK useChat
+  const initialClientKey = getClientGroqKey();
+
+  // Vercel AI SDK useChat with BYOK headers and body payload
   const {
     messages,
     input,
@@ -71,8 +85,17 @@ export function useWritersRoom({
     error: chatError,
   } = useChat({
     api: "/api/chat",
+    headers: {
+      ...(initialClientKey
+        ? {
+            "x-groq-key": initialClientKey,
+            Authorization: `Bearer ${initialClientKey}`,
+          }
+        : {}),
+    },
     body: {
       projectId,
+      apiKey: initialClientKey,
     },
     initialMessages: formattedInitialMessages,
     onResponse: () => {
@@ -149,12 +172,24 @@ export function useWritersRoom({
         option.description ? ` - ${option.description}` : ""
       }`;
 
-      await append({
-        role: "user",
-        content,
-      });
+      const activeKey = getClientGroqKey();
+      await append(
+        {
+          role: "user",
+          content,
+        },
+        {
+          headers: activeKey
+            ? { "x-groq-key": activeKey, Authorization: `Bearer ${activeKey}` }
+            : {},
+          body: {
+            projectId,
+            apiKey: activeKey,
+          },
+        }
+      );
     },
-    [areOptionsLocked, isCompiling, append]
+    [areOptionsLocked, isCompiling, append, projectId]
   );
 
   // Custom Form Submit Wrapper
@@ -163,9 +198,19 @@ export function useWritersRoom({
       e.preventDefault();
       if (!input.trim() || areOptionsLocked || isCompiling) return;
       setIsStreamFinished(false);
-      baseHandleSubmit(e);
+
+      const activeKey = getClientGroqKey();
+      baseHandleSubmit(e, {
+        headers: activeKey
+          ? { "x-groq-key": activeKey, Authorization: `Bearer ${activeKey}` }
+          : {},
+        body: {
+          projectId,
+          apiKey: activeKey,
+        },
+      });
     },
-    [input, areOptionsLocked, isCompiling, baseHandleSubmit]
+    [input, areOptionsLocked, isCompiling, baseHandleSubmit, projectId]
   );
 
   // Parsed representation of messages with decoupled narrative & option cards

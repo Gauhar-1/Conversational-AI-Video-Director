@@ -3,6 +3,13 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { OptionCard } from "@/components/chat/OptionCard";
 import { ChatMessage, ParsedMessageItem } from "@/components/chat/ChatMessage";
 
+const mockUseWritersRoom = jest.fn();
+jest.mock("@/hooks/useWritersRoom", () => ({
+  useWritersRoom: (...args: any[]) => mockUseWritersRoom(...args),
+}));
+
+import { WritersRoom } from "@/components/chat/WritersRoom";
+
 describe("WritersRoom Components: OptionCard & ChatMessage", () => {
   describe("OptionCard", () => {
     const mockOption = {
@@ -180,5 +187,74 @@ describe("WritersRoom Components: OptionCard & ChatMessage", () => {
       expect(screen.getByText("None of these, recalibrate")).toBeInTheDocument();
     });
   });
+
+  describe("WritersRoom Component Input Ergonomics", () => {
+    beforeEach(() => {
+      window.HTMLElement.prototype.scrollIntoView = jest.fn();
+      mockUseWritersRoom.mockReturnValue({
+        messages: [],
+        parsedMessages: [],
+        input: "",
+        handleInputChange: jest.fn(),
+        handleSubmit: jest.fn((e) => e?.preventDefault?.()),
+        isLoading: false,
+        isStreamFinished: true,
+        isCompiling: false,
+        handleSelectOption: jest.fn(),
+        areOptionsLocked: false,
+        error: null,
+      });
+    });
+
+    it("renders the keyboard hints and auto-expanding textarea", () => {
+      render(<WritersRoom projectId="test-p1" />);
+
+      const textarea = screen.getByTestId("chat-input");
+      expect(textarea).toBeInTheDocument();
+      expect(screen.getByText("Shift + Enter")).toBeInTheDocument();
+      expect(screen.getByText("Enter")).toBeInTheDocument();
+    });
+
+    it("displays character counter when paragraph exceeds 80 characters", () => {
+      const longParagraph =
+        "We are launching an artisanal heritage leather footwear brand celebrating craft and resilience across generations.";
+      mockUseWritersRoom.mockReturnValue({
+        messages: [],
+        parsedMessages: [],
+        input: longParagraph,
+        handleInputChange: jest.fn(),
+        handleSubmit: jest.fn(),
+        isLoading: false,
+        isStreamFinished: true,
+        isCompiling: false,
+        handleSelectOption: jest.fn(),
+        areOptionsLocked: false,
+        error: null,
+      });
+
+      render(<WritersRoom projectId="test-p1" />);
+      expect(screen.getByText(`${longParagraph.length} chars`)).toBeInTheDocument();
+    });
+
+    it("renders cinematic compiling screen when isCompiling is true", () => {
+      mockUseWritersRoom.mockReturnValue({
+        messages: [],
+        parsedMessages: [],
+        input: "",
+        handleInputChange: jest.fn(),
+        handleSubmit: jest.fn(),
+        isLoading: false,
+        isStreamFinished: true,
+        isCompiling: true,
+        handleSelectOption: jest.fn(),
+        areOptionsLocked: false,
+        error: null,
+      });
+
+      render(<WritersRoom projectId="test-p1" />);
+      expect(screen.getByText(/Locking Vision & Compiling Pipeline\.\.\./i)).toBeInTheDocument();
+    });
+  });
 });
+
 

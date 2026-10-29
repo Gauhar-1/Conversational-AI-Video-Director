@@ -7,10 +7,10 @@
  * progressive interactive option cards with action locks, and cinematic JSON pipeline compilation.
  */
 
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useCallback } from "react";
 import { useWritersRoom } from "@/hooks/useWritersRoom";
 import { ChatMessage } from "./ChatMessage";
-import { Send, Loader2, Sparkles, Film, ArrowRight, AlertCircle } from "lucide-react";
+import { Send, Loader2, Sparkles, Film, ArrowRight, AlertCircle, CornerDownLeft } from "lucide-react";
 
 interface WritersRoomProps {
   projectId: string;
@@ -36,11 +36,34 @@ export function WritersRoom({ projectId, initialChatHistory = [] }: WritersRoomP
   });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-scroll to bottom as streaming tokens arrive
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (typeof messagesEndRef.current?.scrollIntoView === "function") {
+      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
   }, [parsedMessages, isLoading]);
+
+  // Dynamically auto-expand textarea height as user types or pastes multi-line paragraphs
+  const adjustTextareaHeight = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = "auto";
+    if (!textarea.value.trim()) {
+      textarea.style.height = "52px";
+      return;
+    }
+
+    // Expand comfortably up to 260px (10-12 lines) with internal scrollbar beyond
+    const nextHeight = Math.min(Math.max(textarea.scrollHeight, 52), 260);
+    textarea.style.height = `${nextHeight}px`;
+  }, []);
+
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [input, adjustTextareaHeight]);
 
   // -----------------------------------------------------------------
   // 1. CINEMATIC COMPILING STATE (JSON Interceptor)
@@ -126,14 +149,18 @@ export function WritersRoom({ projectId, initialChatHistory = [] }: WritersRoomP
         </div>
       </div>
 
-      {/* Sticky Bottom Input Bar */}
+      {/* Sticky Bottom Input Bar with Responsive Auto-Expanding Textarea */}
       <div className="border-t border-zinc-800/80 bg-zinc-950/90 backdrop-blur-md p-4 px-6 md:px-10 shrink-0">
         <form onSubmit={handleSubmit} className="max-w-2xl mx-auto flex items-end gap-3">
-          <div className="flex-1 relative bg-zinc-900 border border-zinc-800 rounded-md focus-within:border-zinc-700 transition-colors shadow-inner">
+          <div className="flex-1 relative bg-zinc-900 border border-zinc-800 rounded-md focus-within:border-zinc-700 transition-colors shadow-inner flex flex-col justify-end">
             <textarea
+              ref={textareaRef}
               data-testid="chat-input"
               value={input}
-              onChange={handleInputChange}
+              onChange={(e) => {
+                handleInputChange(e);
+                adjustTextareaHeight();
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -145,17 +172,29 @@ export function WritersRoom({ projectId, initialChatHistory = [] }: WritersRoomP
               placeholder={
                 areOptionsLocked
                   ? "Director is pitching concepts..."
-                  : "Reply to Creative Director or type custom instructions... (Enter to send)"
+                  : "Reply to Creative Director or type custom instructions... (Shift + Enter for newline)"
               }
-              className="w-full bg-transparent p-3 text-sm text-zinc-100 placeholder-zinc-500 resize-none focus:outline-none min-h-[44px] max-h-32"
+              className="w-full bg-transparent p-3.5 text-sm leading-relaxed text-zinc-100 placeholder-zinc-500 focus:outline-none min-h-[52px] max-h-[260px] overflow-y-auto resize-none transition-[height] duration-75"
             />
+
+            {/* Ergonomic Helper Bar */}
+            <div className="px-3 pb-2 pt-0.5 flex items-center justify-between text-[10px] font-mono text-zinc-500 border-t border-zinc-800/40 select-none">
+              <span className="hidden sm:inline text-zinc-500">
+                <kbd className="px-1 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/60 font-sans text-[9px]">Shift + Enter</kbd> newline • <kbd className="px-1 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700/60 font-sans text-[9px]">Enter</kbd> send
+              </span>
+              {input.length > 80 && (
+                <span className="text-zinc-500 ml-auto">
+                  {input.length} chars
+                </span>
+              )}
+            </div>
           </div>
 
           <button
             type="submit"
             data-testid="chat-submit"
             disabled={!input.trim() || isLoading}
-            className="h-[44px] px-4 rounded-md font-medium text-xs tracking-wider uppercase transition-all flex items-center gap-1.5 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed bg-zinc-100 text-zinc-950 hover:bg-white active:scale-95 shadow-sm"
+            className="h-[52px] px-5 rounded-md font-medium text-xs tracking-wider uppercase transition-all flex items-center gap-1.5 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed bg-zinc-100 text-zinc-950 hover:bg-white active:scale-95 shadow-sm self-end mb-0"
           >
             {isLoading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
