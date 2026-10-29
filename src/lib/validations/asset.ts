@@ -9,7 +9,7 @@ import { z } from "zod";
 export const assetTypeSchema = z.enum(["character", "location", "audio", "style"]);
 export type AssetType = z.infer<typeof assetTypeSchema>;
 
-export const assetStatusSchema = z.enum(["draft", "generating", "approved", "rejected"]);
+export const assetStatusSchema = z.enum(["draft", "generating", "approved", "rejected", "ready_for_render"]);
 export type AssetStatus = z.infer<typeof assetStatusSchema>;
 
 export const assetHistoryItemSchema = z.object({

@@ -35,3 +35,4 @@ describe("Strict State Machine & System Prompt Architecture", () => {
     expect(CULTURAL_STORYTELLER_PROMPT).toContain("FORMATTING RULE: Always present options explicitly as [OPTION A], [OPTION B], [OPTION C], and [OPTION D] (Recalibrate).");
   });
 });
+

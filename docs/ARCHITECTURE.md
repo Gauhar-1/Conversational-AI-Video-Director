@@ -431,6 +431,82 @@ sequenceDiagram
 4. **Typewriter Pacer (`useTypewriterPacer`):** Paces incoming stream text to the DOM at 15ms-25ms intervals with adaptive catch-up, simulating an authentic human Creative Director typing live and eliminating jarring raw token dumps.
 5. **Studio-Grade Option Cards:** High-contrast `OptionCard` architecture featuring stark `bg-zinc-100 text-zinc-950` letter badges, distinct typography hierarchy, and hover elevation (`-translate-y-0.5 shadow-lg`).
 
+---
+
+## 15. Background Fan-Out & Rate Limit Mitigation Architecture
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant Action as approveBlueprintAction
+    participant Inngest as Inngest Engine
+    participant Orchestrator as orchestrateBlueprint (Conc: 1)
+    participant Workers as Technical Prompt Workers (Conc: 3)
+    participant Groq as Groq AI (JSON Mode)
+    participant DB as MongoDB (Project & Blueprint)
+    participant UI as SWR Poller (AssetGenerationTracker)
+
+    User->>Action: Approve Blueprint
+    Action->>DB: Blueprint.status = "approved"
+    Action->>Inngest: send("project.blueprint.approved")
+    Action-->>User: Return immediate success
+    User->>UI: View "Generating Assets" live checklist
+
+    Inngest->>Orchestrator: Trigger (concurrency: { limit: 1, key: projectId })
+    Orchestrator->>DB: Load Blueprint document
+    Orchestrator->>Inngest: Fan-Out Dispatch sub-events
+    Note over Orchestrator,Inngest: replicate.prompt.character<br/>replicate.prompt.environment<br/>replicate.prompt.scene
+
+    par Character Worker
+        Inngest->>Workers: replicate.prompt.character (limit: 3)
+        Workers->>Groq: Generate Flux character prompt
+        Workers->>DB: project.global_assets.characters.push(status: "ready_for_render")
+        Workers->>Inngest: replicate.prompt.character.completed
+    and Environment Worker
+        Inngest->>Workers: replicate.prompt.environment (limit: 3)
+        Workers->>Groq: Generate architectural lighting prompt
+        Workers->>DB: project.global_assets.locations.push(status: "ready_for_render")
+        Workers->>Inngest: replicate.prompt.environment.completed
+    and Scene Worker
+        Inngest->>Workers: replicate.prompt.scene (limit: 3)
+        Workers->>Groq: Generate CAM_ANGLE & motion prompt
+        Workers->>DB: project.scenes.push(status: "ready_for_render")
+        Workers->>Inngest: replicate.prompt.scene.completed
+    end
+
+    loop SWR Polling (every 1.5s)
+        UI->>DB: GET /api/projects/:id
+        DB-->>UI: Project document (status: "ready_for_render")
+        UI-->>User: [x] Character locked, [x] Environment locked
+    end
+
+    Orchestrator->>Inngest: step.waitForEvent (characters, environments, scenes)
+    Orchestrator->>DB: Blueprint.status = "completed"
+    UI-->>User: 100% Progress -> "Enter Pipeline" CTA
+```
+
+### 15.1. Master Orchestrator (`/inngest/functions/orchestrateBlueprint.ts`)
+* **Trigger:** `project.blueprint.approved`
+* **Concurrency Protection:** Strictly limited to `concurrency: { limit: 1, key: "event.data.projectId" }` to prevent multiple runs from running simultaneously on the same project and overwhelming the API.
+* **Fan-Out Architecture:** Reads the MongoDB `Blueprint` document and dispatches granular sub-events (`replicate.prompt.character`, `replicate.prompt.environment`, `replicate.prompt.scene`) rather than invoking LLMs in a blocking loop.
+* **Durable Coordination:** Waits for each asset generation event to complete via `step.waitForEvent`. Upon completion of all workers, transitions the Blueprint status to `completed`.
+
+### 15.2. Specialized Prompt Workers (`/inngest/functions/generateTechnicalPrompts.ts`)
+* **Global Rate Limiting:** Enforces `concurrency: { limit: 3 }` across all sub-workers to keep safely below Groq's TPM / RPM thresholds.
+* **Character Worker (`replicate.prompt.character`):** Focuses exclusively on facial features, skin texture, age details, eyes, hair, and wardrobe textures for Replicate Flux generation.
+* **Environment Worker (`replicate.prompt.environment`):** Focuses exclusively on spatial architecture, lighting color temperature, atmospheric volumetric haze, and lens focal length.
+* **Scene Worker (`replicate.prompt.scene`):** Translates narrative action into deterministic `[CAM_ANGLE]` framing, image composition, and 5-second temporal motion physics parameters.
+
+### 15.3. Database Segregation & Status Transitions
+* **Blueprint Immutability:** The creative `Blueprint` collection stores human-readable creative vision and is never overwritten with technical parameters.
+* **Project Aggregation:** Workers push technical results into `Project.global_assets.characters`, `Project.global_assets.locations`, and `Project.scenes`.
+* **Asset Status:** Transitions directly to `ready_for_render` upon technical prompt synthesis.
+
+### 15.4. SWR Reactive Polling & UI Progress Tracker
+* **Hook (`useProjectAssetGeneration.ts`):** Polls `/api/projects/[id]` at 1.5-second intervals via SWR, automatically ceasing polling once all items report `ready_for_render` or `approved`.
+* **Component (`AssetGenerationTracker.tsx`):** Monochromatic studio-grade live checklist showing real-time locks (`[x] Grandfather asset locked`, `[ ] Kitchen environment generating...`) with progress bars and smooth transition to the pipeline timeline.
+
 
 
 

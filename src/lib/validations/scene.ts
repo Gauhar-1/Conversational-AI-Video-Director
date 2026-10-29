@@ -36,6 +36,7 @@ export const sceneStatusSchema = z.enum([
   "idle",
   "enriching",
   "ready",
+  "ready_for_render",
   "generating",
   "completed",
   "failed",

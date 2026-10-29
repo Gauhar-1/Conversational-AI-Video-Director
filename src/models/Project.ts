@@ -164,7 +164,7 @@ export const CharacterAssetSchema = new Schema<ICharacterAssetDoc>(
     pulidSeed: { type: Number, default: 42 },
     status: {
       type: String,
-      enum: ["draft", "generating", "approved", "rejected"],
+      enum: ["draft", "generating", "approved", "rejected", "ready_for_render"],
       default: "draft",
     },
     generationHistory: { type: [AssetHistoryItemSchema], default: [] },
@@ -182,7 +182,7 @@ export const LocationAssetSchema = new Schema<ILocationAssetDoc>(
     imageUrl: { type: String, default: "" },
     status: {
       type: String,
-      enum: ["draft", "generating", "approved", "rejected"],
+      enum: ["draft", "generating", "approved", "rejected", "ready_for_render"],
       default: "draft",
     },
     generationHistory: { type: [AssetHistoryItemSchema], default: [] },
@@ -269,7 +269,7 @@ export const StrictSceneSchema = new Schema<ISceneDoc>(
     activeTakeId: { type: String, default: "" },
     status: {
       type: String,
-      enum: ["draft", "idle", "enriching", "ready", "generating", "completed", "failed"],
+      enum: ["draft", "idle", "enriching", "ready", "ready_for_render", "generating", "completed", "failed"],
       default: "idle",
     },
   },
