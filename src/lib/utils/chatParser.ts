@@ -275,9 +275,15 @@ export function parseChatResponse(content: string): ParsedChatResponse {
     };
   }
 
-  const options = extractOptions(content);
-  const narrativeText = stripOptionsAndJson(content);
-  const jsonResult = extractJsonPayload(content);
+  // Strip internal reasoning <think> blocks (both closed and open streaming tags)
+  const cleanContent = content
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think>[\s\S]*$/gi, "")
+    .trim();
+
+  const options = extractOptions(cleanContent);
+  const narrativeText = stripOptionsAndJson(cleanContent);
+  const jsonResult = extractJsonPayload(cleanContent);
 
   return {
     narrativeText,

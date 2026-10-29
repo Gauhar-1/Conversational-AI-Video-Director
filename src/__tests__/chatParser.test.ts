@@ -221,6 +221,32 @@ His hands are covered in grease, but his eyes glow with joy.
       expect(options).toHaveLength(2);
       expect(options.map((o) => o.id)).toEqual(["A", "D"]);
     });
+
+    it("strips Groq <think> reasoning tags cleanly from narrative and options", () => {
+      const reasoningMessage = `<think>
+The user wants an emotional story for a handcrafted wooden furniture brand.
+Let's anchor this in generational memory and craftsmanship.
+</think>
+Every piece of wood remembers the hands that shaped it. Here are three human angles:
+
+[OPTION A] The Dining Table: Marks from 30 Thanksgiving dinners show the quiet resilience of family.
+[OPTION D] None of these, recalibrate`;
+
+      const parsed = parseChatResponse(reasoningMessage);
+      expect(parsed.narrativeText).not.toContain("<think>");
+      expect(parsed.narrativeText).not.toContain("The user wants an emotional story");
+      expect(parsed.narrativeText).toContain("Every piece of wood remembers");
+      expect(parsed.hasOptions).toBe(true);
+      expect(parsed.options).toHaveLength(2);
+      expect(parsed.options[0].title).toBe("The Dining Table");
+    });
+
+    it("strips streaming unclosed <think> tags while reasoning is in-progress", () => {
+      const streamingReasoning = `<think>Analyzing company context and determining the core human angle...`;
+      const parsed = parseChatResponse(streamingReasoning);
+      expect(parsed.narrativeText).toBe("");
+      expect(parsed.hasOptions).toBe(false);
+    });
   });
 });
 

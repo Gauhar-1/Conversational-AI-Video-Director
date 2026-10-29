@@ -7,10 +7,10 @@
  * progressive interactive option cards with action locks, and cinematic JSON pipeline compilation.
  */
 
-import React, { useRef, useEffect, useCallback } from "react";
+import React, { useRef, useEffect, useCallback, useState } from "react";
 import { useWritersRoom } from "@/hooks/useWritersRoom";
 import { ChatMessage } from "./ChatMessage";
-import { Send, Loader2, Sparkles, Film, ArrowRight, AlertCircle, CornerDownLeft } from "lucide-react";
+import { Send, Loader2, Sparkles, Film, ArrowRight, AlertCircle, CornerDownLeft, Key } from "lucide-react";
 
 interface WritersRoomProps {
   projectId: string;
@@ -18,6 +18,8 @@ interface WritersRoomProps {
 }
 
 export function WritersRoom({ projectId, initialChatHistory = [] }: WritersRoomProps) {
+  const [hasGroqKey, setHasGroqKey] = useState(true);
+
   const {
     parsedMessages,
     input,
@@ -37,6 +39,21 @@ export function WritersRoom({ projectId, initialChatHistory = [] }: WritersRoomP
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Check client-side BYOK key on mount and when window regains focus
+  useEffect(() => {
+    const checkKey = () => {
+      if (typeof window !== "undefined") {
+        const key =
+          localStorage.getItem("director_groq_key") ||
+          localStorage.getItem("groq_api_key");
+        setHasGroqKey(!!(key && key.trim()));
+      }
+    };
+    checkKey();
+    window.addEventListener("focus", checkKey);
+    return () => window.removeEventListener("focus", checkKey);
+  }, []);
 
   // Auto-scroll to bottom as streaming tokens arrive
   useEffect(() => {
@@ -129,6 +146,18 @@ export function WritersRoom({ projectId, initialChatHistory = [] }: WritersRoomP
             </div>
           )}
 
+          {/* BYOK Groq API Key Missing Notice */}
+          {!hasGroqKey && (
+            <div className="p-3.5 bg-zinc-900 border border-zinc-800 rounded-md text-xs text-zinc-300 flex items-center justify-between gap-3 my-4 shadow-md">
+              <div className="flex items-center gap-2.5">
+                <Key className="w-4 h-4 text-zinc-400 shrink-0" />
+                <span>
+                  <strong className="text-zinc-100 font-medium">Groq API Key Required:</strong> To stream concepts from Director AI, please configure your BYOK Groq API key in Settings (gear icon in the top navigation).
+                </span>
+              </div>
+            </div>
+          )}
+
           {/* Compilation Error Notice if any */}
           {compilationError && (
             <div className="p-3 bg-red-950/40 border border-red-800/80 rounded-md text-xs text-red-200 flex items-center gap-2 my-4">
@@ -139,9 +168,12 @@ export function WritersRoom({ projectId, initialChatHistory = [] }: WritersRoomP
 
           {/* General Chat Error Notice */}
           {chatError && (
-            <div className="p-3 bg-red-950/40 border border-red-800/80 rounded-md text-xs text-red-200 flex items-center gap-2 my-4">
-              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-              <span>{chatError.message || "An error occurred during generation. Please retry."}</span>
+            <div className="p-3.5 bg-red-950/40 border border-red-800/80 rounded-md text-xs text-red-200 flex items-start gap-2.5 my-4">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <span className="font-semibold block text-red-100">Director AI Notice:</span>
+                <span className="text-red-300">{chatError.message || "An error occurred during generation. Please verify your Groq API key in Settings."}</span>
+              </div>
             </div>
           )}
 

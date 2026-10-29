@@ -80,6 +80,21 @@ export async function POST(req: Request) {
       const groqProvider = createOpenAI({
         apiKey: userApiKey || "test-key",
         baseURL: "https://api.groq.com/openai/v1",
+        fetch: async (url, options) => {
+          // Ensure reasoning_format: "raw" is passed to Groq so reasoning tokens
+          // are emitted in delta.content instead of delta.reasoning_content
+          if (options?.body && typeof options.body === "string") {
+            try {
+              const parsed = JSON.parse(options.body);
+              parsed.reasoning_format = "raw";
+              options = {
+                ...options,
+                body: JSON.stringify(parsed),
+              };
+            } catch {}
+          }
+          return fetch(url, options);
+        },
       });
 
       // Stream with Vercel AI SDK
@@ -91,24 +106,49 @@ export async function POST(req: Request) {
           content: m.content,
         })),
         temperature: 0.7,
+        onError: ({ error }) => {
+          console.error("[api/chat] Groq streamText error:", error);
+        },
         onFinish: async ({ text }) => {
           try {
+            // Strip any internal thought tags before persisting
+            const cleanText = text
+              ? text
+                  .replace(/<think>[\s\S]*?<\/think>/gi, "")
+                  .replace(/<think>[\s\S]*$/gi, "")
+                  .trim()
+              : "";
+
+            if (!cleanText) {
+              console.warn(
+                "[api/chat] Assistant text was empty onFinish, skipping chatHistory persistence."
+              );
+              return;
+            }
+
             await dbConnect();
             const targetProject = await Project.findById(projectId);
             if (targetProject) {
               const lastUserMessage = messages[messages.length - 1];
-              if (lastUserMessage?.role === "user") {
+              if (
+                lastUserMessage?.role === "user" &&
+                lastUserMessage.content &&
+                typeof lastUserMessage.content === "string" &&
+                lastUserMessage.content.trim().length > 0
+              ) {
                 targetProject.chatHistory.push({
                   role: "user",
-                  content: lastUserMessage.content,
+                  content: lastUserMessage.content.trim(),
                   timestamp: Date.now().toString(),
                 });
               }
+
               targetProject.chatHistory.push({
                 role: "assistant",
-                content: text,
+                content: cleanText,
                 timestamp: Date.now().toString(),
               });
+
               await targetProject.save();
             }
           } catch (err) {
@@ -117,7 +157,18 @@ export async function POST(req: Request) {
         },
       });
 
-      return result.toDataStreamResponse();
+      return result.toDataStreamResponse({
+        getErrorMessage: (err: any) => {
+          const msg =
+            err instanceof Error
+              ? err.message
+              : typeof err === "string"
+              ? err
+              : "Failed to communicate with Groq AI.";
+          console.error("[api/chat] Stream response error:", msg);
+          return msg;
+        },
+      });
     }
 
     // ---------------------------------------------------------
