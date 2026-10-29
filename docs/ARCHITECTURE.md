@@ -419,6 +419,12 @@ sequenceDiagram
 4. **Action Locking & Interaction Shield (`useWritersRoom.ts`):** Option cards remain disabled and dimmed (`opacity-50 cursor-not-allowed`) while the LLM is actively streaming. Cards illuminate and unlock exclusively upon the `onFinish` stream callback.
 5. **The JSON Interceptor:** When the custom hook detects ````json` in the stream finale, it automatically hides the chat interface, renders the full-screen cinematic compiler, updates MongoDB via `compileWritersRoomPipelineAction`, and routes the user directly to `/pipeline`.
 
+### 14.2. BYOK Key Forwarding & Input Ergonomics
+1. **Client-Side BYOK Forwarding:** In production, user Groq API keys reside in browser `localStorage` (`"director_groq_key"`, `"groq_api_key"`). `useWritersRoom` forwards the key via `x-groq-key` headers and body payload on every request. `/api/chat` prioritizes client headers and body keys over server environment variables, preventing authorization failures when the server operates in BYOK mode.
+2. **Resilient SDK Initialization:** `src/lib/ai.ts` initializes with fallback credentials to ensure module evaluation never halts Next.js API routes before request-specific BYOK tokens can be extracted.
+3. **Auto-Expanding Paragraph Ergonomics:** The Writer's Room textarea automatically calculates `scrollHeight` on every keystroke, expanding smoothly from 52px up to 260px (10–12 lines) with internal scrolling beyond. Includes `Shift + Enter` multiline handling and real-time character counters.
+
+
 
 
 
