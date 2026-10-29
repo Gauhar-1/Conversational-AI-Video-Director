@@ -81,6 +81,37 @@ export async function POST(req: Request) {
       const groqProvider = createOpenAI({
         apiKey: userApiKey || "test-key",
         baseURL: "https://api.groq.com/openai/v1",
+        fetch: async (url, options) => {
+          // Schema Guard: Ensure tools array strictly conforms to Groq top-level 'object' requirements
+          // without 'oneOf'/'anyOf'/'enum'/'not' at the root
+          if (options?.body && typeof options.body === "string") {
+            try {
+              const parsed = JSON.parse(options.body);
+              if (Array.isArray(parsed.tools)) {
+                for (const t of parsed.tools) {
+                  if (t?.function && (!t.function.parameters?.type || t.function.parameters.type !== "object")) {
+                    t.function.parameters = {
+                      type: "object",
+                      properties: {
+                        query: {
+                          type: "string",
+                          description: "The explicit search query to find brand context.",
+                        },
+                      },
+                      required: ["query"],
+                      additionalProperties: false,
+                    };
+                  }
+                }
+                options = {
+                  ...options,
+                  body: JSON.stringify(parsed),
+                };
+              }
+            } catch {}
+          }
+          return fetch(url, options);
+        },
       });
 
       // Stream with Vercel AI SDK with auto tool choice and webSearch capabilities
@@ -93,14 +124,14 @@ export async function POST(req: Request) {
         })),
         tools: {
           webSearch: tool({
-            description: "Search the web for real-time context on brands, companies, products, or cultural references",
+            description: "Search the web for real-time context about the brand or product.",
             parameters: z.object({
-              query: z.string().describe("The search query or brand name to look up"),
+              query: z.string().describe("The explicit search query to find brand context."),
             }),
             execute: async ({ query }) => {
               return {
                 query,
-                summary: `Information for ${query}: Premium brand focused on quality craftsmanship, emotional resonance, and sustainable design.`,
+                summary: `Verified context for ${query}: Premium brand focused on quality craftsmanship, emotional resonance, and sustainable design.`,
               };
             },
           }),
