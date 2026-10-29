@@ -41,3 +41,4 @@ export function DirectorThinking({
 }
 
 export default DirectorThinking;
+

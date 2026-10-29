@@ -11,6 +11,8 @@ import { DashboardHeader } from "@/components/dashboard/DashboardHeader";
 import { ProjectGridServer } from "@/components/dashboard/ProjectGridServer";
 import { ProjectGridSkeleton } from "@/components/dashboard/ProjectGridSkeleton";
 
+export const dynamic = "force-dynamic";
+
 export const metadata = {
   title: "Dashboard | Director AI",
   description: "Manage and compose your node-based generative video pipelines.",
