@@ -82,12 +82,16 @@ export async function POST(req: Request) {
         apiKey: userApiKey || "test-key",
         baseURL: "https://api.groq.com/openai/v1",
         fetch: async (url, options) => {
-          // Schema Guard: Ensure tools array strictly conforms to Groq top-level 'object' requirements
-          // without 'oneOf'/'anyOf'/'enum'/'not' at the root
           if (options?.body && typeof options.body === "string") {
             try {
               const parsed = JSON.parse(options.body);
-              if (Array.isArray(parsed.tools)) {
+
+              // 1. Explicitly disable parallel tool calls to prevent Groq JSON parse collisions
+              parsed.parallel_tool_calls = false;
+
+              // 2. Schema Guard: Ensure tools array strictly conforms to Groq top-level 'object' requirements
+              // without 'oneOf'/'anyOf'/'enum'/'not' at the root
+              if (Array.isArray(parsed.tools) && parsed.tools.length > 0) {
                 for (const t of parsed.tools) {
                   if (t?.function && (!t.function.parameters?.type || t.function.parameters.type !== "object")) {
                     t.function.parameters = {
@@ -103,47 +107,90 @@ export async function POST(req: Request) {
                     };
                   }
                 }
-                options = {
-                  ...options,
-                  body: JSON.stringify(parsed),
-                };
               }
+              options = {
+                ...options,
+                body: JSON.stringify(parsed),
+              };
             } catch {}
           }
           return fetch(url, options);
         },
       });
 
-      // Stream with Vercel AI SDK with auto tool choice and webSearch capabilities
-      const result = streamText({
-        model: groqProvider(activeChatModel),
-        system: CULTURAL_STORYTELLER_PROMPT,
-        messages: messages.map((m: any) => ({
+      // ---------------------------------------------------------
+      // Narrative Continuity Enforcer:
+      // Guarantee that the entire historical conversation context is passed to Groq.
+      // If the client only passed the latest turn, merge with project.chatHistory from DB.
+      // ---------------------------------------------------------
+      let effectiveMessages = messages;
+      if (messages.length === 1 && project?.chatHistory && project.chatHistory.length > 0) {
+        const dbHistory = project.chatHistory.map((m: any) => ({
           role: m.role as "user" | "assistant" | "system",
           content: m.content,
-        })),
-        tools: {
-          webSearch: tool({
-            description: "Search the web for real-time context about the brand or product.",
-            parameters: z.object({
-              query: z.string().describe("The explicit search query to find brand context."),
-            }),
-            execute: async ({ query }) => {
-              return {
-                query,
-                summary: `Verified context for ${query}: Premium brand focused on quality craftsmanship, emotional resonance, and sustainable design.`,
-              };
-            },
-          }),
-        },
-        toolChoice: "auto",
-        maxSteps: 3,
+        }));
+        effectiveMessages = [...dbHistory, ...messages];
+      }
+
+      const formattedMessages = effectiveMessages
+        .filter(
+          (m: any) =>
+            m &&
+            typeof m.content === "string" &&
+            m.content.trim().length > 0
+        )
+        .map((m: any) => ({
+          role: m.role as "user" | "assistant" | "system",
+          content: m.content.trim(),
+        }));
+
+      // ---------------------------------------------------------
+      // Step 7 Detection: Remove tools array completely during Final JSON
+      // Prevents Groq from confusing markdown JSON output with tool calling
+      // ---------------------------------------------------------
+      const isStep7 = (() => {
+        const userMsgs = formattedMessages.filter((m) => m.role === "user");
+        const assistantMsgs = formattedMessages.filter((m) => m.role === "assistant");
+        if (userMsgs.length === 0) return false;
+
+        const lastUser = userMsgs[userMsgs.length - 1]?.content || "";
+        const lastAssistant = assistantMsgs[assistantMsgs.length - 1]?.content || "";
+
+        // Explicit request for Step 7 / final JSON / compilation
+        if (/step\s*7|final\s*json|generate\s*storyboard|compile/i.test(lastUser)) {
+          return true;
+        }
+
+        // Previous assistant pitch was Step 6 (CTA), so this turn is Step 7 (Final JSON)
+        const isStep6Pitched =
+          /step\s*6/i.test(lastAssistant) ||
+          /\bcta\b/i.test(lastAssistant) ||
+          /call\s*to\s*action/i.test(lastAssistant) ||
+          /emotional\s*conclusion/i.test(lastAssistant);
+
+        if (isStep6Pitched) {
+          return true;
+        }
+
+        // 6 or more user messages have occurred (Intake -> Angle -> Hook -> Casting -> Art -> CTA locked)
+        if (userMsgs.length >= 6) {
+          return true;
+        }
+
+        return false;
+      })();
+
+      // Base stream configuration with lowered deterministic temperature (0.3)
+      const streamConfig: any = {
+        model: groqProvider(activeChatModel),
+        system: CULTURAL_STORYTELLER_PROMPT,
+        messages: formattedMessages,
         maxTokens: 4000,
         temperature: 0.3,
-        onError: ({ error }) => {
+        onError: ({ error }: any) => {
           console.error("[api/chat] Groq streamText error:", error);
         },
-        onFinish: async ({ text, reasoning }) => {
+        onFinish: async ({ text, reasoning }: any) => {
           try {
             // Strip any internal thought tags before persisting
             const rawOutput = text || reasoning || "";
@@ -164,18 +211,25 @@ export async function POST(req: Request) {
             await dbConnect();
             const targetProject = await Project.findById(projectId);
             if (targetProject) {
-              const lastUserMessage = messages[messages.length - 1];
+              const lastUserMessage = formattedMessages[formattedMessages.length - 1];
               if (
                 lastUserMessage?.role === "user" &&
                 lastUserMessage.content &&
                 typeof lastUserMessage.content === "string" &&
                 lastUserMessage.content.trim().length > 0
               ) {
-                targetProject.chatHistory.push({
-                  role: "user",
-                  content: lastUserMessage.content.trim(),
-                  timestamp: Date.now().toString(),
-                });
+                const isAlreadySaved =
+                  targetProject.chatHistory.length > 0 &&
+                  targetProject.chatHistory[targetProject.chatHistory.length - 1].role === "user" &&
+                  targetProject.chatHistory[targetProject.chatHistory.length - 1].content === lastUserMessage.content.trim();
+
+                if (!isAlreadySaved) {
+                  targetProject.chatHistory.push({
+                    role: "user",
+                    content: lastUserMessage.content.trim(),
+                    timestamp: Date.now().toString(),
+                  });
+                }
               }
 
               targetProject.chatHistory.push({
@@ -190,7 +244,29 @@ export async function POST(req: Request) {
             console.error("Failed to persist streaming chat history:", err);
           }
         },
-      });
+      };
+
+      // Only provide tools when NOT generating Step 7 final JSON
+      if (!isStep7) {
+        streamConfig.tools = {
+          webSearch: tool({
+            description: "Search the web for real-time context about the brand or product.",
+            parameters: z.object({
+              query: z.string().describe("The explicit search query to find brand context."),
+            }),
+            execute: async ({ query }) => {
+              return {
+                query,
+                summary: `Verified context for ${query}: Premium brand focused on quality craftsmanship, emotional resonance, and sustainable design.`,
+              };
+            },
+          }),
+        };
+        streamConfig.toolChoice = "auto";
+        streamConfig.maxSteps = 3;
+      }
+
+      const result = streamText(streamConfig);
 
       return result.toDataStreamResponse({
         getErrorMessage: (err: any) => {
@@ -222,13 +298,14 @@ export async function POST(req: Request) {
       timestamp: Date.now().toString(),
     });
 
-    const recentHistory = project.chatHistory.slice(-8).map((m: any) => ({ role: m.role, content: m.content }));
+    // Provide full narrative continuity rather than slicing off early turns
+    const recentHistory = project.chatHistory.slice(-30).map((m: any) => ({ role: m.role, content: m.content }));
     const chatMessages: any[] = [{ role: "system", content: CULTURAL_STORYTELLER_PROMPT }, ...recentHistory];
 
     const chatResponse = await client.chat.completions.create({
       model: activeChatModel,
       messages: chatMessages,
-      temperature: 0.7,
+      temperature: 0.3,
       max_completion_tokens: 8000,
     } as any);
 

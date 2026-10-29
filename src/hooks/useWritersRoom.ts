@@ -86,6 +86,7 @@ export function useWritersRoom({
   // Vercel AI SDK useChat with BYOK headers and body payload
   const {
     messages,
+    setMessages,
     input,
     handleInputChange,
     handleSubmit: baseHandleSubmit,
@@ -125,6 +126,19 @@ export function useWritersRoom({
       }
     },
   });
+
+  // Synchronize useChat messages with incoming or updated chat history to prevent amnesia
+  useEffect(() => {
+    if (initialChatHistory && initialChatHistory.length > 0) {
+      setMessages(
+        initialChatHistory.map((m, idx) => ({
+          id: `hist-${idx}-${m.role}`,
+          role: m.role,
+          content: m.content,
+        }))
+      );
+    }
+  }, [initialChatHistory, setMessages]);
 
   // Pipeline Compilation Handler
   const handlePipelineCompilation = useCallback(

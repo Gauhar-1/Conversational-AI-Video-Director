@@ -413,8 +413,8 @@ sequenceDiagram
 ```
 
 ### 14.1. Core Architectural Pillars
-1. **Decoupled System Controller:** `CULTURAL_STORYTELLER_PROMPT` in `/lib/ai/prompts.ts` strictly encodes human truths (unspoken sacrifices, generational bonds) over technical features, progressive multiple-choice options (`[OPTION A/B/C/D]`), and the final JSON compilation schema.
-2. **StreamText Controller (`/api/chat/route.ts`):** Employs Vercel AI SDK's `streamText` function pointing to Groq (`@ai-sdk/openai`), streaming tokens via `toDataStreamResponse()`.
+1. **Decoupled System Controller:** `CULTURAL_STORYTELLER_PROMPT` in `/lib/ai/prompts.ts` strictly encodes the 7-Step Agency Checklist (Intake -> Angle -> Hook -> Casting -> Art Direction -> CTA -> Final JSON), 4 Critical State Machine Rules (One Step Per Turn, Narrative Continuity, Custom Input Handling, and Cinematography Camera Direction), progressive multiple-choice options (`[OPTION A/B/C/D]`), and the final JSON compilation schema.
+2. **StreamText Controller (`/api/chat/route.ts`):** Employs Vercel AI SDK's `streamText` function pointing to Groq (`@ai-sdk/openai`), streaming tokens via `toDataStreamResponse()`. Temperature is locked at `0.3` for deterministic state transitions.
 3. **Regex Parser Engine (`/lib/utils/chatParser.ts`):** `extractOptions`, `stripOptionsAndJson`, and `extractJsonPayload` cleanly divide streaming prose from interactive cards and pipeline JSON.
 4. **Action Locking & Interaction Shield (`useWritersRoom.ts`):** Option cards remain disabled and dimmed (`opacity-50 cursor-not-allowed`) while the LLM is actively streaming. Cards illuminate and unlock exclusively upon the `onFinish` stream callback.
 5. **The JSON Interceptor:** When the custom hook detects ````json` in the stream finale, it automatically hides the chat interface, renders the full-screen cinematic compiler, updates MongoDB via `compileWritersRoomPipelineAction`, and routes the user directly to `/pipeline`.
@@ -424,11 +424,12 @@ sequenceDiagram
 2. **Resilient SDK Initialization:** `src/lib/ai.ts` initializes with fallback credentials to ensure module evaluation never halts Next.js API routes before request-specific BYOK tokens can be extracted.
 3. **Auto-Expanding Paragraph Ergonomics:** The Writer's Room textarea automatically calculates `scrollHeight` on every keystroke, expanding smoothly from 52px up to 260px (10–12 lines) with internal scrolling beyond. Includes `Shift + Enter` multiline handling and real-time character counters.
 
-### 14.3. Tool Calling Architecture & Human-Speed Pacing
-1. **Autonomous Web Search Tool Integration:** `/api/chat/route.ts` registers a `webSearch` tool with `toolChoice: 'auto'` and `maxSteps: 3`. This eliminates Groq `tool_use_failed` errors when reasoning models like `openai/gpt-oss-20b` attempt to research unknown brands, allowing multi-step reasoning before synthesizing narrative responses.
-2. **Director Thinking State (`<DirectorThinking />`):** Replaces basic spinners with a pulsating studio-grade status bar (`bg-zinc-900 border-zinc-800 animate-pulse`), masking inference and search latency with prestigious creative direction updates.
-3. **Typewriter Pacer (`useTypewriterPacer`):** Paces incoming stream text to the DOM at 15ms-25ms intervals with adaptive catch-up, simulating an authentic human Creative Director typing live and eliminating jarring raw token dumps.
-4. **Studio-Grade Option Cards:** High-contrast `OptionCard` architecture featuring stark `bg-zinc-100 text-zinc-950` letter badges, distinct typography hierarchy, and hover elevation (`-translate-y-0.5 shadow-lg`).
+### 14.3. Tool Calling Architecture, Step 7 Suppression & Human-Speed Pacing
+1. **Autonomous Web Search & Step 7 Tool Suppression:** `/api/chat/route.ts` registers a `webSearch` tool with `toolChoice: 'auto'` and `maxSteps: 3` for earlier creative steps. Parallel tool calls are explicitly disabled wire-level (`parallel_tool_calls: false`). When the conversation transitions to Step 7 (Final JSON), the `tools` array is completely purged, preventing Groq from misinterpreting JSON pipeline markdown as tool argument calls.
+2. **Narrative Continuity Enforcer:** Both `useChat` on the client and the `/api/chat` controller pass the complete conversation history on every request, hydrating missing turns directly from MongoDB to eliminate model amnesia.
+3. **Director Thinking State (`<DirectorThinking />`):** Replaces basic spinners with a pulsating studio-grade status bar (`bg-zinc-900 border-zinc-800 animate-pulse`), masking inference and search latency with prestigious creative direction updates.
+4. **Typewriter Pacer (`useTypewriterPacer`):** Paces incoming stream text to the DOM at 15ms-25ms intervals with adaptive catch-up, simulating an authentic human Creative Director typing live and eliminating jarring raw token dumps.
+5. **Studio-Grade Option Cards:** High-contrast `OptionCard` architecture featuring stark `bg-zinc-100 text-zinc-950` letter badges, distinct typography hierarchy, and hover elevation (`-translate-y-0.5 shadow-lg`).
 
 
 

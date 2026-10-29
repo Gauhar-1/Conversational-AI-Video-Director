@@ -46,6 +46,7 @@ export function WritersRoomContainer({
 
   return (
     <WritersRoom
+      key={projectId + (effectiveHistory.length > 0 ? `-${effectiveHistory.length}` : "-fresh")}
       projectId={projectId}
       initialChatHistory={effectiveHistory}
     />
