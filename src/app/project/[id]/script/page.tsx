@@ -11,7 +11,7 @@ import { use, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { StageHeader } from "@/components/navigation/StageHeader";
-import ChatInterface from "@/components/chat/ChatInterface";
+import WritersRoomContainer from "@/components/chat/WritersRoomContainer";
 import SettingsModal from "@/components/settings/SettingsModal";
 
 export default function ScriptWorkspacePage({
@@ -65,12 +65,7 @@ export default function ScriptWorkspacePage({
       {/* Writer's Room Workspace: Center-aligned chat (max-w-3xl) */}
       <main className="flex-1 flex justify-center overflow-hidden bg-zinc-950">
         <div className="w-full max-w-3xl h-full flex flex-col border-x border-zinc-800/80 bg-zinc-950 shadow-2xl">
-          <ChatInterface
-            activeProjectId={id}
-            onStoryboardReady={() => {
-              // Smooth notification or auto prompt to proceed
-            }}
-          />
+          <WritersRoomContainer projectId={id} />
         </div>
       </main>
 

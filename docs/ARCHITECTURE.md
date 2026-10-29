@@ -375,6 +375,50 @@ To guarantee desktop-grade performance on low-end devices and high-latency netwo
 *   **Local Development Fallback:** When running without an active Supabase OAuth session in local development (`process.env.NODE_ENV !== "production"`), `getAuthUser()` falls back seamlessly to `DEV_DEFAULT_USER_ID` (`00000000-0000-0000-0000-000000000001`), ensuring developers and unauthenticated guest sessions are never locked out of their active workspaces.
 *   **Zero-Empty Flash on Server Grid:** `ProjectGridServer` uses `effectiveUserId = userId || DEV_DEFAULT_USER_ID` rather than bailing out with an empty list, allowing active projects to render instantly while preserving authentication gates for mutations.
 
+---
+
+## 14. The Writer's Room & Emotional State Machine
+
+Stage 1 (`/project/[id]/script`) transforms basic business and product facts into cinematic, human-centric advertising concepts adhering to the "Piyush Pandey" narrative philosophy:
+
+```mermaid
+sequenceDiagram
+    participant User as Creative / User
+    participant WR as WritersRoom UI (React)
+    participant Hook as useWritersRoom Hook
+    participant Route as POST /api/chat
+    participant Groq as Groq (streamText)
+    participant Action as compilePipelineAction
+    participant DB as MongoDB
+
+    User->>WR: Type brand context (Step 1 Intake)
+    WR->>Hook: handleSubmit(e)
+    Hook->>Route: Stream chat request
+    Route->>Groq: streamText with CULTURAL_STORYTELLER_PROMPT
+    Groq-->>Route: Tokens ([OPTION A/B/C/D])
+    Route-->>Hook: DataStream
+    Hook-->>WR: Parsed narrative & Action-Locked Option Cards
+    Note over WR: Cards illuminated on stream completion (onFinish)
+    User->>WR: Click Option Card
+    WR->>Hook: handleSelectOption(option)
+    Hook->>Route: Next step in 5-step creative funnel
+    Groq-->>Route: Step 6 JSON Finale (```json ... ```)
+    Route-->>Hook: Stream completes with JSON
+    Hook->>WR: Render cinematic "Locking Vision..." visualizer
+    Hook->>Action: compileWritersRoomPipelineAction(projectId, json)
+    Action->>DB: Lock characters, environments, scenes & advance stage
+    Action-->>Hook: Project updated
+    Hook->>WR: router.push('/project/[id]/pipeline')
+```
+
+### 14.1. Core Architectural Pillars
+1. **Decoupled System Controller:** `CULTURAL_STORYTELLER_PROMPT` in `/lib/ai/prompts.ts` strictly encodes human truths (unspoken sacrifices, generational bonds) over technical features, progressive multiple-choice options (`[OPTION A/B/C/D]`), and the final JSON compilation schema.
+2. **StreamText Controller (`/api/chat/route.ts`):** Employs Vercel AI SDK's `streamText` function pointing to Groq (`@ai-sdk/openai`), streaming tokens via `toDataStreamResponse()`.
+3. **Regex Parser Engine (`/lib/utils/chatParser.ts`):** `extractOptions`, `stripOptionsAndJson`, and `extractJsonPayload` cleanly divide streaming prose from interactive cards and pipeline JSON.
+4. **Action Locking & Interaction Shield (`useWritersRoom.ts`):** Option cards remain disabled and dimmed (`opacity-50 cursor-not-allowed`) while the LLM is actively streaming. Cards illuminate and unlock exclusively upon the `onFinish` stream callback.
+5. **The JSON Interceptor:** When the custom hook detects ````json` in the stream finale, it automatically hides the chat interface, renders the full-screen cinematic compiler, updates MongoDB via `compileWritersRoomPipelineAction`, and routes the user directly to `/pipeline`.
+
+
 
 
 
