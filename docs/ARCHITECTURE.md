@@ -370,10 +370,11 @@ To guarantee desktop-grade performance on low-end devices and high-latency netwo
 *   **React 19 `useOptimistic`:** Visual updates for project creation, camera framing adjustments (`NodeInspector`, `SceneMacroNode`), and take deletions apply synchronously to local React state before Server Actions resolve.
 *   **Subtle Error Rollback:** If a network failure occurs, the state rolls back automatically while surfacing a non-blocking toast banner.
 
-### 13.6. Resilient User Scoping & Legacy Project Continuity
-*   **Active Project Preservation:** To ensure active projects created prior to Supabase multi-tenant authentication remain accessible, `projectRepository` and `ProjectService` execute a resilient query filter (`{ $or: [{ userId }, { userId: DEV_DEFAULT_USER_ID }, { userId: { $exists: false } }, { userId: null }, { userId: "" }] }`).
-*   **Local Development Fallback:** When running without an active Supabase OAuth session in local development (`process.env.NODE_ENV !== "production"`), `getAuthUser()` falls back seamlessly to `DEV_DEFAULT_USER_ID` (`00000000-0000-0000-0000-000000000001`), ensuring developers and unauthenticated guest sessions are never locked out of their active workspaces.
-*   **Zero-Empty Flash on Server Grid:** `ProjectGridServer` uses `effectiveUserId = userId || DEV_DEFAULT_USER_ID` rather than bailing out with an empty list, allowing active projects to render instantly while preserving authentication gates for mutations.
+### 13.6. Strict Multi-Tenant Isolation & Guided Project Creation Modal
+*   **Strict Multi-Tenant Isolation:** To ensure that each user sees strictly their own production sequences, queries in `projectRepository` and `ProjectService` execute direct equality matches on `{ userId }` (derived from validated Supabase session cookies or verified JWT tokens). Unauthenticated users cannot view any project cards on the dashboard and are prompted via `AuthModal`.
+*   **Guided Creation Modal (`CreateProjectModal.tsx`):** When initiating a sequence, the application opens a studio-grade modal prompting the user for their desired Project Title and Aspect Ratio (`9:16` Vertical Reel vs. `16:9` Cinema).
+*   **Direct Transition to The Writer's Room:** Upon creation, the application synchronously applies an optimistic project card and immediately transitions the user into `/project/[id]/script` (The Writer's Room) to begin the guided creative intake funnel.
+
 
 ---
 

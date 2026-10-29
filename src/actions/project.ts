@@ -6,7 +6,7 @@
  * Strictly enforces user authentication and delegates to ProjectRepository.
  */
 
-import { getAuthUser, DEV_DEFAULT_USER_ID } from "@/lib/auth/getAuthUser";
+import { getAuthUser } from "@/lib/auth/getAuthUser";
 import { projectRepository } from "@/lib/db/repositories/projectRepository";
 import { Project, ISceneDoc, ICharacterAssetDoc, ILocationAssetDoc } from "@/models/Project";
 import dbConnect from "@/lib/db";
@@ -114,13 +114,7 @@ export async function compileWritersRoomPipelineAction(
 
   const project = await Project.findOne({
     _id: projectId,
-    $or: [
-      { userId },
-      { userId: DEV_DEFAULT_USER_ID },
-      { userId: { $exists: false } },
-      { userId: null },
-      { userId: "" },
-    ],
+    userId,
   });
 
   if (!project) {

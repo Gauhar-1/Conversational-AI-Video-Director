@@ -10,6 +10,7 @@ import React, { useState, useTransition, useOptimistic } from "react";
 import { useRouter } from "next/navigation";
 import { ProjectCard, CreateProjectCard, ProjectCardData } from "@/components/dashboard/ProjectCard";
 import AuthModal from "@/components/auth/AuthModal";
+import { CreateProjectModal } from "@/components/dashboard/CreateProjectModal";
 import { createProjectAction } from "@/actions/project";
 import { AlertCircle, X } from "lucide-react";
 
@@ -29,6 +30,7 @@ export function DashboardProjectGrid({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Optimistic UI state: updates visual grid synchronously before server action completes
@@ -51,16 +53,17 @@ export function DashboardProjectGrid({
       setIsAuthModalOpen(true);
       return;
     }
+    // Authenticated user: open modal to ask for the project title
+    setIsCreateModalOpen(true);
+  };
+
+  const handleCreateProjectSubmit = (title: string, aspectRatio: "9:16" | "16:9") => {
+    setIsCreateModalOpen(false);
 
     const tempId = `temp-${Date.now()}`;
-    const newProjectTitle = `Project ${new Date().toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-    })} Sequence`;
-
     const optimisticProject: ProjectCardData = {
       _id: tempId,
-      title: newProjectTitle,
+      title,
       updatedAt: new Date().toISOString(),
       currentStage: "writers_room",
       sceneCount: 0,
@@ -77,11 +80,12 @@ export function DashboardProjectGrid({
       try {
         // 2. Fire Server Action in the background
         const created = await createProjectAction({
-          title: newProjectTitle,
-          aspectRatio: "9:16",
+          title,
+          aspectRatio,
         });
 
         if (created?._id) {
+          // Seamless transition directly to The Writer's Room
           router.push(`/project/${created._id}/script`);
         }
       } catch (err: any) {
@@ -133,6 +137,14 @@ export function DashboardProjectGrid({
         }}
         title="Sign in to Initialize Project"
         subtitle="Authenticate to create your secure, isolated video production workspace."
+      />
+
+      {/* Studio-Grade Create Project Modal */}
+      <CreateProjectModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onSubmit={handleCreateProjectSubmit}
+        isCreating={isPending}
       />
     </>
   );

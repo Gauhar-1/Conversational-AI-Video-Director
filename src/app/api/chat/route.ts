@@ -11,7 +11,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import dbConnect from "@/lib/db";
 import { Project } from "@/models/Project";
 import { ai } from "@/lib/ai";
-import { getAuthUser, DEV_DEFAULT_USER_ID } from "@/lib/auth/getAuthUser";
+import { getAuthUser } from "@/lib/auth/getAuthUser";
 import { CULTURAL_STORYTELLER_PROMPT } from "@/lib/ai/prompts";
 import { repairAndParseJson } from "@/lib/utils/jsonRepair";
 
@@ -52,16 +52,7 @@ export async function POST(req: Request) {
     }
 
     await dbConnect();
-    const project = (await Project.findById?.(projectId)) || (await Project.findOne({
-      _id: projectId,
-      $or: [
-        { userId },
-        { userId: DEV_DEFAULT_USER_ID },
-        { userId: { $exists: false } },
-        { userId: null },
-        { userId: "" },
-      ],
-    }));
+    const project = (await Project.findById?.(projectId)) || (await Project.findOne({ _id: projectId, userId }));
 
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });

@@ -6,7 +6,6 @@
 
 import { Project, IProject } from "@/models/Project";
 import dbConnect from "@/lib/db";
-import { DEV_DEFAULT_USER_ID } from "@/lib/auth/getAuthUser";
 import { withMongoTransaction } from "@/lib/db/transaction";
 import type { IProjectRepository } from "./types";
 import type {
@@ -16,36 +15,16 @@ import type {
   ProjectStage,
 } from "@/lib/validations/project";
 
-/**
- * Builds a query filter scoped to userId with resilient fallback to dev/legacy projects
- * so that active and unassigned projects remain fully accessible.
- */
-function buildProjectFilter(userId: string, projectId?: string) {
-  if (process.env.NODE_ENV === "test" && userId !== DEV_DEFAULT_USER_ID) {
-    return projectId ? { _id: projectId, userId } : { userId };
-  }
-  const userCondition = {
-    $or: [
-      { userId },
-      { userId: DEV_DEFAULT_USER_ID },
-      { userId: { $exists: false } },
-      { userId: null },
-      { userId: "" },
-    ],
-  };
-  return projectId ? { _id: projectId, ...userCondition } : userCondition;
-}
-
 export class ProjectRepository implements IProjectRepository {
   /**
    * Retrieves lightweight project summaries for the user dashboard.
+   * Strictly scoped to the authenticated user's projects.
    * Employs projection to exclude heavy scenes and prompts, minimizing bandwidth.
    */
   async getUserProjects(userId: string): Promise<ProjectSummary[]> {
     await dbConnect();
 
-    const query = buildProjectFilter(userId);
-    const projects = await Project.find(query)
+    const projects = await Project.find({ userId })
       .select(
         "_id userId title thumbnailUrl currentStage aspectRatio scenes.sceneId global_assets.characters.assetId global_assets.locations.assetId updatedAt createdAt"
       )
@@ -77,8 +56,7 @@ export class ProjectRepository implements IProjectRepository {
    */
   async getProjectById(userId: string, projectId: string): Promise<IProject | null> {
     await dbConnect();
-    const query = buildProjectFilter(userId, projectId);
-    return await Project.findOne(query);
+    return await Project.findOne({ _id: projectId, userId });
   }
 
   /**
@@ -161,9 +139,8 @@ export class ProjectRepository implements IProjectRepository {
       }
     }
 
-    const query = buildProjectFilter(userId, projectId);
     return await Project.findOneAndUpdate(
-      query,
+      { _id: projectId, userId },
       { $set: updateFields },
       { new: true, runValidators: true }
     );
@@ -178,9 +155,8 @@ export class ProjectRepository implements IProjectRepository {
     stage: ProjectStage
   ): Promise<IProject | null> {
     await dbConnect();
-    const query = buildProjectFilter(userId, projectId);
     return await Project.findOneAndUpdate(
-      query,
+      { _id: projectId, userId },
       { $set: { currentStage: stage } },
       { new: true, runValidators: true }
     );
@@ -195,9 +171,8 @@ export class ProjectRepository implements IProjectRepository {
     scriptContent: string
   ): Promise<IProject | null> {
     await dbConnect();
-    const query = buildProjectFilter(userId, projectId);
     return await Project.findOneAndUpdate(
-      query,
+      { _id: projectId, userId },
       { $set: { scriptContent } },
       { new: true, runValidators: true }
     );
@@ -208,8 +183,7 @@ export class ProjectRepository implements IProjectRepository {
    */
   async deleteProject(userId: string, projectId: string): Promise<boolean> {
     await dbConnect();
-    const query = buildProjectFilter(userId, projectId);
-    const result = await Project.deleteOne(query);
+    const result = await Project.deleteOne({ _id: projectId, userId });
     return result.deletedCount > 0;
   }
 }

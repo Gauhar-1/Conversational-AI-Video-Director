@@ -5,7 +5,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { getAuthUser, requireAuthUser, DEV_DEFAULT_USER_ID } from "@/lib/auth/getAuthUser";
+import { requireAuthUser } from "@/lib/auth/getAuthUser";
 import { ProjectService } from "@/lib/services/projectService";
 import { updateProjectSchema } from "@/lib/validations/project";
 
@@ -14,8 +14,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const auth = await getAuthUser(req);
-    const userId = auth.userId || process.env.DEV_USER_ID || DEV_DEFAULT_USER_ID;
+    const { userId } = await requireAuthUser(req);
     const { id } = await params;
 
     const project = await ProjectService.getProjectById(userId, id);

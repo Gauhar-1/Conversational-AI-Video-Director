@@ -6,7 +6,6 @@
 
 import { Project, IProject, ISceneDoc, CameraAngle } from "@/models/Project";
 import dbConnect from "@/lib/db";
-import { DEV_DEFAULT_USER_ID } from "@/lib/auth/getAuthUser";
 import { withMongoTransaction } from "@/lib/db/transaction";
 import {
   type CreateProjectType,
@@ -14,22 +13,6 @@ import {
   DEFAULT_CHARACTER_ANCHOR,
   DEFAULT_ENVIRONMENT_ANCHOR,
 } from "@/lib/validations/project";
-
-function buildProjectFilter(userId: string, projectId: string) {
-  if (process.env.NODE_ENV === "test" && userId !== DEV_DEFAULT_USER_ID) {
-    return { _id: projectId, userId };
-  }
-  return {
-    _id: projectId,
-    $or: [
-      { userId },
-      { userId: DEV_DEFAULT_USER_ID },
-      { userId: { $exists: false } },
-      { userId: null },
-      { userId: "" },
-    ],
-  };
-}
 
 export class ProjectService {
   /**
@@ -47,8 +30,7 @@ export class ProjectService {
    */
   static async getProjectById(userId: string, projectId: string): Promise<IProject | null> {
     await dbConnect();
-    const query = buildProjectFilter(userId, projectId);
-    const project = await Project.findOne(query);
+    const project = await Project.findOne({ _id: projectId, userId });
     if (!project) return null;
 
     // Auto-migrate legacy storyboard array to strict scenes if empty
@@ -154,9 +136,8 @@ export class ProjectService {
     if (input.globalVault !== undefined) updateFields.globalVault = input.globalVault;
     if (input.scenes !== undefined) updateFields.scenes = input.scenes;
 
-    const query = buildProjectFilter(userId, projectId);
     return await Project.findOneAndUpdate(
-      query,
+      { _id: projectId, userId },
       { $set: updateFields },
       { new: true, runValidators: true }
     ).lean();
@@ -168,9 +149,8 @@ export class ProjectService {
    */
   static async getSceneWithVault(userId: string, projectId: string, sceneId: string) {
     await dbConnect();
-    const query = buildProjectFilter(userId, projectId);
     const project = await Project.findOne(
-      query,
+      { _id: projectId, userId },
       { globalVault: 1, scenes: 1 }
     ).lean();
 
@@ -198,8 +178,7 @@ export class ProjectService {
     updates: Partial<ISceneDoc>
   ) {
     await dbConnect();
-    const query = buildProjectFilter(userId, projectId);
-    const project = await Project.findOne(query);
+    const project = await Project.findOne({ _id: projectId, userId });
     if (!project) return null;
 
     const sceneIdx = project.scenes.findIndex((s) => s.sceneId === sceneId);
